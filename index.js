@@ -21,6 +21,11 @@ import { games, createGame, assignRoles, getGuildGames, addLog, checkWinConditio
 import { buildLobbyEmbed, buildLobbyButtons, buildRoleDmEmbed, buildKickButtons }   from './embeds.js';
 import { startNightPhase, endGame } from './phases.js';
 
+// ── Ticket system imports ──────────────────────────────────────────────────────
+import { handleOpenTicket, handleClaimTicket, handleCloseTicket, handleCloseConfirm, handleCloseCancel } from './bot/handlers/tickets.js';
+import { handleSetupCommand, handleOpenCategorySelect, handleClosedCategorySelect, handleStaffRolesSelect, handleEmbedModal, handlePostChannelSelect, handleSetupReset, handleSetupCancel } from './bot/commands/setup.js';
+import { deployCommands } from './bot/deploy.js';
+
 // ─────────────────────────────────────────────────────────────────────────────
 const token   = process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID  || '725076744251637760';
@@ -63,6 +68,7 @@ client.once(Events.ClientReady, c => {
   console.log('🔪 Commands: !dilaay !kasaar !join !leave !help !icaawi !dm !news !say !dashboard');
   console.log('ℹ️  Discord Developer Portal → Bot → SERVER MEMBERS INTENT + MESSAGE CONTENT INTENT fur!');
   startTaxScheduler(client);
+  deployCommands(token, c.user.id).catch(err => console.error("⚠️ deployCommands error:", err?.message || err));
 });
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
@@ -332,6 +338,48 @@ async function handleAllMessages(msg) {
 // COMBINED INTERACTION HANDLER
 // ─────────────────────────────────────────────────────────────────────────────
 async function handleAllInteractions(interaction) {
+  // ── Slash commands ─────────────────────────────────────────────────────────
+  if (interaction.isChatInputCommand()) {
+    if (interaction.commandName === 'setup') await handleSetupCommand(interaction);
+    return;
+  }
+
+  // ── Channel select menus (ticket setup) ───────────────────────────────────
+  if (interaction.isChannelSelectMenu()) {
+    switch (interaction.customId) {
+      case 'setup_open_category':   await handleOpenCategorySelect(interaction);   break;
+      case 'setup_closed_category': await handleClosedCategorySelect(interaction); break;
+      case 'setup_post_channel':    await handlePostChannelSelect(interaction);    break;
+    }
+    return;
+  }
+
+  // ── Role select menus (ticket setup) ──────────────────────────────────────
+  if (interaction.isRoleSelectMenu()) {
+    if (interaction.customId === 'setup_staff_roles') await handleStaffRolesSelect(interaction);
+    return;
+  }
+
+  // ── Modal Submit ───────────────────────────────────────────────────────────
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'setup_embed_modal') { await handleEmbedModal(interaction); return; }
+    if (interaction.customId.startsWith('say_modal_')) await handleSayModalSubmit(interaction);
+    return;
+  }
+
+  // ── Ticket buttons ─────────────────────────────────────────────────────────
+  if (interaction.isButton()) {
+    switch (interaction.customId) {
+      case 'ticket_open':          await handleOpenTicket(interaction);   return;
+      case 'ticket_claim':         await handleClaimTicket(interaction);  return;
+      case 'ticket_close':         await handleCloseTicket(interaction);  return;
+      case 'ticket_close_confirm': await handleCloseConfirm(interaction); return;
+      case 'ticket_close_cancel':  await handleCloseCancel(interaction);  return;
+      case 'setup_reset':          await handleSetupReset(interaction);   return;
+      case 'setup_cancel':         await handleSetupCancel(interaction);  return;
+    }
+  }
+
   // ── !bomb buttons ──────────────────────────────────────────────────────────
   if (interaction.isButton()) {
     const handled = await handleBombInteraction(interaction);
