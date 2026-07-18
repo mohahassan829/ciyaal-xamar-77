@@ -23,7 +23,6 @@ export function createGame(guildId, channelId, hostId) {
     votes: [],
     nightKillTarget: null,
     nightSaveTarget: null,
-    // Set: sheriff player IDs oo horeba u isticmaalay xabbadooda habeenkan
     nightSheriffUsed: new Set(),
     lobbyMessageId: null,
     nightMessageId: null,
@@ -37,7 +36,6 @@ export function createGame(guildId, channelId, hostId) {
   return game;
 }
 
-/** All active (non-ended) games running in a guild */
 export function getGuildGames(guildId) {
   return Array.from(games.values()).filter(
     g => g.guildId === guildId && g.phase !== "ended"
@@ -82,7 +80,7 @@ export function getDilaayePlayers(game) {
 export function checkWinCondition(game) {
   const alive = getAlivePlayers(game);
   const aliveDilaaye = alive.filter(p => p.role === "dilaaye").length;
-  const aliveShacab = alive.filter(p => p.role !== "dilaaye").length;
+  const aliveShacab  = alive.filter(p => p.role !== "dilaaye").length;
   if (aliveDilaaye === 0) return "shacab";
   if (aliveDilaaye >= aliveShacab) return "dilaaye";
   return null;
@@ -101,21 +99,11 @@ export function getVoteResults(game) {
 export function getMostVoted(game) {
   const counts = getVoteResults(game);
   if (counts.size === 0) return null;
-
-  let maxVotes = 0;
-  let maxPlayer = null;
-  let tie = false;
-
+  let maxVotes = 0, maxPlayer = null, tie = false;
   counts.forEach((count, playerId) => {
-    if (count > maxVotes) {
-      maxVotes = count;
-      maxPlayer = playerId;
-      tie = false;
-    } else if (count === maxVotes) {
-      tie = true;
-    }
+    if (count > maxVotes) { maxVotes = count; maxPlayer = playerId; tie = false; }
+    else if (count === maxVotes) { tie = true; }
   });
-
   return tie ? null : maxPlayer;
 }
 

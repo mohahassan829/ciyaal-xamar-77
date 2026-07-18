@@ -5,7 +5,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
 } from "discord.js";
-import { getAlivePlayers, getDilaayePlayers, getRoleCounts } from "./game.js";
+import { getAlivePlayers, getDilaayePlayers, getRoleCounts } from "./dilaay-game.js";
 
 const IMAGES = {
   shacab:   "https://cdn.noctaly.com/servers/859126603619631115/tJGyElBTEm.jpg",

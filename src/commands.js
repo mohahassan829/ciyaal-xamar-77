@@ -1,6 +1,6 @@
 // src/commands.js — !bomb, !work, !balance, !givecash, !grant, !deduct, !ecodebug (ES module)
 import { EmbedBuilder } from 'discord.js';
-import { BombGame, activeGames } from './game.js';
+import { BombGame, activeGames } from './bomb-game.js';
 import {
   getUser, getBalance, addBalance, deductBalance,
   getLastWork, setLastWork, getEcoStatus,

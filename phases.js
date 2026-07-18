@@ -3,12 +3,12 @@ import { EmbedBuilder } from "discord.js";
 import {
   getAlivePlayers, getDilaayePlayers, checkWinCondition,
   getMostVoted, getVoteResults, addLog,
-} from "./game.js";
+} from "./dilaay-game.js";
 import {
   buildNightEmbed, buildDayEmbed, buildVoteButtons, buildVoteResultEmbed,
   buildWinEmbed, buildNightKillButtons, buildNightSaveButtons, buildNightSheriffButtons,
   buildSheriffTurnEmbed,
-} from "./embeds.js";
+} from "./dilaay-embeds.js";
 
 const NIGHT_DURATION = 30000;
 const DAY_DURATION   = 60000;

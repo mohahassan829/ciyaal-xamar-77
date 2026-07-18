@@ -1,6 +1,6 @@
 // src/interactions.js — all button handlers for !bomb game (ES module)
 import { EmbedBuilder, MessageFlags } from 'discord.js';
-import { activeGames } from './game.js';
+import { activeGames } from './bomb-game.js';
 import { getBalance, addBalance, deductBalance } from './economy.js';
 
 const Ephemeral = MessageFlags.Ephemeral;
