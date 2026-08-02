@@ -146,7 +146,7 @@ async function handleAllMessages(msg) {
   
   if (econCommands.includes(cmd)) {
     const user = await db.getUser(msg.author.id, msg.author.username);
-    if (user.jailUntil > Date.now()) {
+    if (cmd !== 'jailbuy' && user.jailUntil > Date.now()) {
       const remaining = Math.ceil((user.jailUntil - Date.now()) / 60000);
       return msg.reply(`🚔 Waxaad ku jirtaa Xabsi! Waxaad u baahan tahay **${remaining}** daqiiqo oo dheeraad ah. Isticmaal \`!jailbuy\` si aad u baxdo.`);
     }
@@ -291,26 +291,39 @@ async function handleAllMessages(msg) {
       }
       case 'jailbuy': {
         if (user.jailUntil <= Date.now()) return msg.reply('❌ Kuma jirtid xabsi!');
+        
+        const args = msg.content.split(/ +/);
+        const manualMinutes = parseInt(args[1]);
+
+        if (!isNaN(manualMinutes) && manualMinutes > 0) {
+          const price = manualMinutes * 15;
+          if (user.bank < price) return msg.reply(`❌ Bank-kaaga lacag ku filan kuma jirto ($${price} ayaa loo baahan yahay).`);
+          
+          await db.removeBank(msg.author.id, price);
+          const newJailUntil = Math.max(Date.now(), user.jailUntil - (manualMinutes * 60 * 1000));
+          await db.updateUser(msg.author.id, { jailUntil: newJailUntil });
+          return msg.reply({ embeds: [econUtils.createEmbed('✅ Xabsiga waa lagaa dhimay', `Waxaad bixisay **$${price}**, waxaana lagaa dhimay **${manualMinutes} daqiiqo**.`)] });
+        }
+
         const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId('jail_2').setLabel('2 Min ($50)').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('jail_3').setLabel('3 Min ($80)').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('jail_5').setLabel('5 Min ($120)').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('jail_8').setLabel('8 Min ($180)').setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId('jail_10').setLabel('10 Min ($250)').setStyle(ButtonStyle.Secondary)
+          new ButtonBuilder().setCustomId('jail_2').setLabel('2 Min ($30)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_3').setLabel('3 Min ($45)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_5').setLabel('5 Min ($75)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_8').setLabel('8 Min ($120)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_10').setLabel('10 Min ($150)').setStyle(ButtonStyle.Secondary)
         );
-        const jailEmbed = econUtils.createEmbed('🚔 Jail Buy', 'Dooro inta daqiiqo ee aad rabto inaad iska bixiso lacagta si aad u baxdo.');
+        const jailEmbed = econUtils.createEmbed('🚔 Jail Buy', 'Dooro inta daqiiqo ee aad rabto inaad iska bixiso lacagta si aad u baxdo.\n\n💰 **Qiimaha:** $15 halkii daqiiqo.');
         const reply = await msg.reply({ embeds: [jailEmbed], components: [row] });
         const collector = reply.createMessageComponentCollector({ filter: i => i.user.id === msg.author.id, time: 60000 });
         collector.on('collect', async i => {
-          const option = i.customId.split('_')[1];
-          const prices = { '2': 50, '3': 80, '5': 120, '8': 180, '10': 250 };
-          const price = prices[option];
+          const option = parseInt(i.customId.split('_')[1]);
+          const price = option * 15;
           const currentUser = await db.getUser(msg.author.id);
           if (currentUser.bank < price) return i.reply({ content: `❌ Bank-kaaga lacag ku filan kuma jirto ($${price} ayaa loo baahan yahay).`, ephemeral: true });
           await db.removeBank(msg.author.id, price);
-          const newJailUntil = Math.max(Date.now(), currentUser.jailUntil - (parseInt(option) * 60 * 1000));
+          const newJailUntil = Math.max(Date.now(), currentUser.jailUntil - (option * 60 * 1000));
           await db.updateUser(msg.author.id, { jailUntil: newJailUntil });
-          await i.update({ embeds: [econUtils.createEmbed('✅ Xabsiga waa lagaa dhimay', `Waxaad bixisay $${price}, waxaana lagaa dhimay ${option} daqiiqo.`)], components: [] });
+          await i.update({ embeds: [econUtils.createEmbed('✅ Xabsiga waa lagaa dhimay', `Waxaad bixisay **$${price}**, waxaana lagaa dhimay **${option} daqiiqo** ka dib.`)], components: [] });
         });
         return;
       }
