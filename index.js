@@ -19,6 +19,10 @@ import { handleOpenTicket, handleClaimTicket, handleCloseTicket, handleCloseConf
 import { handleSetupCommand, handleOpenCategorySelect, handleClosedCategorySelect, handleStaffRolesSelect, handleEmbedModal, handlePostChannelSelect, handleSetupReset, handleSetupCancel } from './bot/commands/setup.js';
 import { deployCommands } from './bot/deploy.js';
 
+// ── Economy System imports ──────────────────────────────────────────────────────
+import db from './db.js';
+import * as econUtils from './economyUtils.js';
+
 // ─────────────────────────────────────────────────────────────────────────────
 const token   = process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID  || '725076744251637760';
@@ -55,12 +59,42 @@ process.on('uncaughtException', err => {
 });
 
 // ─── Ready ────────────────────────────────────────────────────────────────────
-client.once('clientReady', c => {
+client.once('clientReady', async c => {
+  await db.init();
   console.log(`✅ Bot diyaar: ${c.user.tag} | ${c.guilds.cache.size} server`);
-  console.log('🔪 Commands: !dilaay !kasaar !join !leave !help !icaawi !dm !news !say !dashboard');
+  console.log('🔪 Commands: !dilaay !kasaar !join !leave !help !icaawi !dm !news !say !dashboard !cx !wallet !work !daily !rob !shop !bank');
   console.log('ℹ️  Discord Developer Portal → Bot → SERVER MEMBERS INTENT + MESSAGE CONTENT INTENT fur!');
+  
+  setInterval(checkTaxes, 60 * 60 * 1000);
+  checkTaxes();
+
   deployCommands(token, c.user.id).catch(err => console.error("⚠️ deployCommands error:", err?.message || err));
 });
+
+async function checkTaxes() {
+  const now = Date.now();
+  const users = await db.getAllUsers();
+  for (const user of users) {
+    if (now - user.lastTax >= econUtils.config.taxInterval) {
+      let taxToDeduct = econUtils.config.taxAmount;
+      if (user.bank >= taxToDeduct) {
+        await db.updateUser(user.userId, { bank: user.bank - taxToDeduct, lastTax: now });
+      } else {
+        let remaining = taxToDeduct - user.bank;
+        await db.updateUser(user.userId, { bank: 0, wallet: Math.max(0, user.wallet - remaining), lastTax: now });
+      }
+      if (user.hasPlayedCX) {
+        try {
+          const discordUser = await client.users.fetch(user.userId);
+          const taxEmbed = econUtils.createEmbed('💰 Tax System', `Waxaa lagaa jaray **$${econUtils.config.taxAmount}** Tax (3-Day Tax). Mahadsanid isticmaalka Economy-ga.`, econUtils.config.colors.economy);
+          await discordUser.send({ embeds: [taxEmbed] });
+        } catch (err) {}
+      }
+    }
+  }
+}
+
+const economyCooldowns = new Map();
 
 // ─── Message Handler ──────────────────────────────────────────────────────────
 client.on(Events.MessageCreate, msg => {
@@ -106,6 +140,232 @@ async function handleAllMessages(msg) {
   const guildId   = msg.guild.id;
   const isOwner   = msg.author.id === OWNER_ID;
 
+  // ── Economy Commands ────────────────────────────────────────────────────────
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct'];
+  const cmd = content.split(' ')[0].slice(1);
+  
+  if (econCommands.includes(cmd)) {
+    const user = await db.getUser(msg.author.id);
+    if (user.jailUntil > Date.now()) {
+      const remaining = Math.ceil((user.jailUntil - Date.now()) / 60000);
+      return msg.reply(`🚔 Waxaad ku jirtaa Xabsi! Waxaad u baahan tahay **${remaining}** daqiiqo oo dheeraad ah. Isticmaal \`!jailbuy\` si aad u baxdo.`);
+    }
+
+    switch (cmd) {
+      case 'wallet': {
+        const shieldStatus = user.shieldUntil > Date.now() ? '🛡️ **Active**' : '🔓 **Inactive**';
+        const walletEmbed = new EmbedBuilder()
+          .setAuthor({ name: `${msg.author.username}'s Balance`, iconURL: msg.author.displayAvatarURL() })
+          .setColor(econUtils.config.colors.economy)
+          .addFields(
+            { name: '💵 Wallet', value: `\`$${user.wallet.toLocaleString()}\``, inline: true },
+            { name: '🏦 Bank', value: `\`$${user.bank.toLocaleString()}\``, inline: true },
+            { name: '💎 Diamonds', value: `\`${user.diamonds.toLocaleString()}\``, inline: true },
+            { name: '🛡️ Shield Status', value: shieldStatus, inline: false }
+          )
+          .setFooter({ text: 'Economy System • Modern & Secure' })
+          .setTimestamp();
+        return msg.reply({ embeds: [walletEmbed] });
+      }
+      case 'work': {
+        const cooldown = 2 * 60 * 60 * 1000;
+        if (Date.now() - user.lastWork < cooldown) {
+          return msg.reply(`⏳ Fadlan sug **${econUtils.formatTime(cooldown - (Date.now() - user.lastWork))}** si aad mar kale u shaqeyso.`);
+        }
+        await db.addWallet(msg.author.id, 200);
+        await db.updateUser(msg.author.id, { lastWork: Date.now() });
+        return msg.reply('💼 Waxaad shaqeysay maanta, waxaadna heshay **$200 Cash**!');
+      }
+      case 'daily': {
+        const cooldown = 24 * 60 * 60 * 1000;
+        if (Date.now() - user.lastDaily < cooldown) {
+          return msg.reply(`⏳ Fadlan sug **${econUtils.formatTime(cooldown - (Date.now() - user.lastDaily))}** si aad u qaadato hadiyaddaada daily-ga.`);
+        }
+        const row = new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('claim_daily').setLabel('🎁 Claim Daily').setStyle(ButtonStyle.Primary));
+        const dailyEmbed = econUtils.createEmbed('🎁 Daily Gift', 'Riix badhanka hoose si aad u qaadato hadiyaddaada.');
+        const reply = await msg.reply({ embeds: [dailyEmbed], components: [row] });
+        const collector = reply.createMessageComponentCollector({ filter: i => i.user.id === msg.author.id, time: 60000 });
+        collector.on('collect', async i => {
+          if (i.customId === 'claim_daily') {
+            const isDiamond = Math.random() < 0.3;
+            let rewardText = '';
+            if (isDiamond) {
+              const diaRewards = [1, 1, 1, 2, 2, 3, 5, 10];
+              const weights = [20, 20, 20, 15, 10, 8, 5, 2];
+              const rand = Math.random() * 100;
+              let sum = 0, amount = 1;
+              for(let j=0; j<weights.length; j++) { sum += weights[j]; if(rand <= sum) { amount = diaRewards[j]; break; } }
+              await db.addDiamonds(msg.author.id, amount);
+              rewardText = `💎 ${amount} Diamonds`;
+            } else {
+              const cashRewards = [50, 70, 100, 200, 500, 1000];
+              const weights = [30, 30, 20, 15, 4, 1];
+              const rand = Math.random() * 100;
+              let sum = 0, amount = 50;
+              for(let j=0; j<weights.length; j++) { sum += weights[j]; if(rand <= sum) { amount = cashRewards[j]; break; } }
+              await db.addWallet(msg.author.id, amount);
+              rewardText = `$${amount} Cash`;
+            }
+            await db.updateUser(msg.author.id, { lastDaily: Date.now() });
+            const successEmbed = econUtils.createEmbed('🎁 Daily Claimed', `Waxaad heshay: **${rewardText}**!`);
+            await i.update({ embeds: [successEmbed], components: [] });
+            try { await msg.author.send({ embeds: [successEmbed] }); } catch(e) {}
+          }
+        });
+        return;
+      }
+      case 'cx': {
+        const args = msg.content.split(/ +/);
+        const amount = econUtils.parseAmount(args[1] || '', user.wallet);
+        const choice = args[2]?.toLowerCase();
+        if (!amount || amount > user.wallet) return msg.reply('❌ Lacagta aad dhigtay ma saxna ama wallet-kaaga kuma filna.');
+        if (!['m', 'x'].includes(choice)) return msg.reply('❌ Fadlan dooro **m** (Madax) ama **x** (Xarash). Tusaale: `!cx 100 m`');
+        const cxCooldown = 30000;
+        const lastCX = economyCooldowns.get(`${msg.author.id}_cx`) || 0;
+        if (Date.now() - lastCX < cxCooldown) {
+          return msg.reply(`⏳ Fadlan sug **${Math.ceil((cxCooldown - (Date.now() - lastCX)) / 1000)}s** si aad mar kale u ciyaarto.`);
+        }
+        economyCooldowns.set(`${msg.author.id}_cx`, Date.now());
+        const result = Math.random() < 0.5 ? 'm' : 'x';
+        const resultName = result === 'm' ? 'Madax (M)' : 'Xarash (X)';
+        const choiceName = choice === 'm' ? 'Madax (M)' : 'Xarash (X)';
+        await db.updateUser(msg.author.id, { hasPlayedCX: 1 });
+        if (choice === result) {
+          await db.addWallet(msg.author.id, amount);
+          return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**`, econUtils.config.colors.success)] });
+        } else {
+          await db.removeWallet(msg.author.id, amount);
+          return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] });
+        }
+      }
+      case 'rob': {
+        const target = msg.mentions.users.first();
+        if (!target || target.bot || target.id === msg.author.id) return msg.reply('❌ Fadlan mention garee qof aad rabto inaad dhacdo.');
+        const targetData = await db.getUser(target.id);
+        if (targetData.shieldUntil > Date.now()) return msg.reply(`🛡️ ${target.toString()} wuxuu leeyahay Shield, ma dhici kartid!`);
+        if (targetData.wallet < 100) return msg.reply(`❌ ${target.toString()} lacag ku filan ma haysto (ugu yaraan $100).`);
+        const robCooldown = 5 * 60 * 1000;
+        const lastRob = economyCooldowns.get(`${msg.author.id}_rob`) || 0;
+        if (Date.now() - lastRob < robCooldown) {
+          return msg.reply(`⏳ Fadlan sug **${econUtils.formatTime(robCooldown - (Date.now() - lastRob))}** si aad mar kale wax u dhacdo.`);
+        }
+        economyCooldowns.set(`${msg.author.id}_rob`, Date.now());
+        const rand = Math.random();
+        if (rand < 0.4) {
+          const amount = Math.floor(Math.random() * (targetData.wallet * 0.5)) + 50;
+          await db.removeWallet(target.id, amount);
+          await db.addWallet(msg.author.id, amount);
+          return msg.reply(`✅ Waad ku guuleysatay! Waxaad ka xaday ${target.toString()} lacag dhan **$${amount.toLocaleString()}**.`);
+        } else if (rand < 0.7) {
+          return msg.reply(`❌ Fashilmay! Waxba ma aadan helin.`);
+        } else {
+          const jailTime = Math.floor(Math.random() * 10) + 1;
+          await db.updateUser(msg.author.id, { jailUntil: Date.now() + (jailTime * 60 * 1000) });
+          return msg.reply(`🚔 Jail! Booliska ayaa ku qabtay, waxaadna xirnaan doontaa **${jailTime} daqiiqo**.`);
+        }
+      }
+      case 'shop': {
+        const shopEmbed = econUtils.createEmbed('🛒 Economy Shop', 'Isticmaal amarrada hoose si aad wax u iibsato.')
+          .addFields(
+            { name: '🛡️ !buyshield', value: '25 Diamonds (24 Hours Protection)', inline: true },
+            { name: '💰 !buycash <amount>', value: 'Exchange Diamonds for Cash', inline: true },
+            { name: '💎 Rates', value: '100 Cash = 5 💎\n200 Cash = 10 💎\n300 Cash = 20 💎', inline: false }
+          );
+        return msg.reply({ embeds: [shopEmbed] });
+      }
+      case 'buyshield': {
+        if (user.diamonds < 25) return msg.reply('❌ Ma haysatid Diamonds ku filan (25 💎 ayaa loo baahan yahay).');
+        await db.removeDiamonds(msg.author.id, 25);
+        await db.updateUser(msg.author.id, { shieldUntil: Date.now() + (24 * 60 * 60 * 1000) });
+        return msg.reply('🛡️ Waxaad iibsatay Shield! Waxaad ka badbaadaysaa dhaca muddo **24 saacadood** ah.');
+      }
+      case 'buycash': {
+        const args = msg.content.split(/ +/);
+        const amount = parseInt(args[1] || '');
+        if (!amount || ![100, 200, 300].includes(amount)) return msg.reply('❌ Fadlan dooro lacagta aad rabto (100, 200, ama 300).');
+        let cost = amount === 100 ? 5 : amount === 200 ? 10 : 20;
+        if (user.diamonds < cost) return msg.reply(`❌ Ma haysatid Diamonds ku filan (${cost} 💎 ayaa loo baahan yahay).`);
+        await db.removeDiamonds(msg.author.id, cost);
+        await db.addWallet(msg.author.id, amount);
+        return msg.reply(`💰 Waxaad ku beddelatay ${cost} 💎 lacag dhan **$${amount} Cash**.`);
+      }
+      case 'jailbuy': {
+        if (user.jailUntil <= Date.now()) return msg.reply('❌ Kuma jirtid xabsi!');
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('jail_2').setLabel('2 Min ($50)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_3').setLabel('3 Min ($80)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_5').setLabel('5 Min ($120)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_8').setLabel('8 Min ($180)').setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId('jail_10').setLabel('10 Min ($250)').setStyle(ButtonStyle.Secondary)
+        );
+        const jailEmbed = econUtils.createEmbed('🚔 Jail Buy', 'Dooro inta daqiiqo ee aad rabto inaad iska bixiso lacagta si aad u baxdo.');
+        const reply = await msg.reply({ embeds: [jailEmbed], components: [row] });
+        const collector = reply.createMessageComponentCollector({ filter: i => i.user.id === msg.author.id, time: 60000 });
+        collector.on('collect', async i => {
+          const option = i.customId.split('_')[1];
+          const prices = { '2': 50, '3': 80, '5': 120, '8': 180, '10': 250 };
+          const price = prices[option];
+          const currentUser = await db.getUser(msg.author.id);
+          if (currentUser.bank < price) return i.reply({ content: `❌ Bank-kaaga lacag ku filan kuma jirto ($${price} ayaa loo baahan yahay).`, ephemeral: true });
+          await db.removeBank(msg.author.id, price);
+          const newJailUntil = Math.max(Date.now(), currentUser.jailUntil - (parseInt(option) * 60 * 1000));
+          await db.updateUser(msg.author.id, { jailUntil: newJailUntil });
+          await i.update({ embeds: [econUtils.createEmbed('✅ Xabsiga waa lagaa dhimay', `Waxaad bixisay $${price}, waxaana lagaa dhimay ${option} daqiiqo.`)], components: [] });
+        });
+        return;
+      }
+      case 'dep': {
+        const args = msg.content.split(/ +/);
+        const amount = econUtils.parseAmount(args[1] || '', user.wallet);
+        if (!amount || amount > user.wallet) return msg.reply('❌ Lacagta aad dhigayso ma saxna ama wallet-kaaga kuma filna.');
+        await db.removeWallet(msg.author.id, amount);
+        await db.addBank(msg.author.id, amount);
+        return msg.reply(`🏦 Waxaad dhigatay **$${amount.toLocaleString()}** Bank-kaaga.`);
+      }
+      case 'with': {
+        const args = msg.content.split(/ +/);
+        const amount = econUtils.parseAmount(args[1] || '', user.bank);
+        if (!amount || amount > user.bank) return msg.reply('❌ Lacagta aad la baxayso ma saxna ama bank-kaaga kuma filna.');
+        await db.removeBank(msg.author.id, amount);
+        await db.addWallet(msg.author.id, amount);
+        return msg.reply(`💸 Waxaad kala soo baxday **$${amount.toLocaleString()}** Bank-kaaga.`);
+      }
+      case 'give': {
+        const args = msg.content.split(/ +/);
+        const target = msg.mentions.users.first();
+        const amount = econUtils.parseAmount(args[2] || '', user.wallet);
+        if (!target || target.bot || target.id === msg.author.id) return msg.reply('❌ Fadlan mention garee qof sax ah.');
+        if (!amount || amount > user.wallet) return msg.reply('❌ Lacagta aad dirayso ma saxna ama wallet-kaaga kuma filna.');
+        await db.removeWallet(msg.author.id, amount);
+        await db.addWallet(target.id, amount);
+        return msg.reply(`💸 Waxaad u dirtay **$${amount.toLocaleString()}** ${target.toString()}.`);
+      }
+      case 'rank': {
+        const top = await db.getTopRich(10);
+        let desc = top.map((t, i) => `**${i + 1}.** <@${t.userId}> — **$${t.total.toLocaleString()}**`).join('\n');
+        return msg.reply({ embeds: [econUtils.createEmbed('🏆 Top 10 Richest Players', desc || 'Ma jiro qof weli liiska ku jira.', econUtils.config.colors.economy)] });
+      }
+      case 'grant': {
+        if (!isOwner) return;
+        const args = msg.content.split(/ +/);
+        const target = msg.mentions.users.first();
+        const amount = parseInt(args[2] || '');
+        if (!target || isNaN(amount)) return msg.reply('❌ Tusaale: `!grant @user 1000`');
+        await db.addWallet(target.id, amount);
+        return msg.reply(`👑 Owner: Waxaad u dartay **$${amount.toLocaleString()}** ${target.toString()}.`);
+      }
+      case 'deduct': {
+        if (!isOwner) return;
+        const args = msg.content.split(/ +/);
+        const target = msg.mentions.users.first();
+        const amount = parseInt(args[2] || '');
+        if (!target || isNaN(amount)) return msg.reply('❌ Tusaale: `!deduct @user 1000`');
+        await db.removeWallet(target.id, amount);
+        return msg.reply(`👑 Owner: Waxaad ka jartay **$${amount.toLocaleString()}** ${target.toString()}.`);
+      }
+    }
+  }
+
   // ── !help ──────────────────────────────────────────────────────────────────
   if (content === '!help') {
     const embed = new EmbedBuilder()
@@ -127,10 +387,21 @@ async function handleAllMessages(msg) {
           '  _Tusaale: `!icaawi Bot-ka lobby kuma furin`_',
         ].join('\n') },
         { name: '📝 Say Command', value: '`!say` — Foom modal ah furo si bot-ku fariin idinku dhaha (Admin/Manage Messages)' },
+        { name: '💰 Economy System', value: [
+          '`!wallet` — Wallet, Bank iyo Diamonds arag',
+          '`!cx <amount> <m/x>` — Lacag ku khamaar (Madax/Xarash)',
+          '`!work` — Shaqayso 2 saacadood kasta ($200)',
+          '`!daily` — Hadiyad maalinle ah qaado',
+          '`!rob @user` — Qof kale lacag ka xado',
+          '`!bank` — `!dep <amount>` ama `!with <amount>`',
+          '`!shop` — Shield ama Cash iibso',
+          '`!rank` — Top 10 Richest Players',
+        ].join('\n') },
         { name: '📊 Owner Commands', value: [
           '`!dashboard` — Serverrada bot ku jira oo dhan arag (Owner kaliya)',
           '`!dm @qof farriin` — DM gaar ah (Owner)',
           '`!news farriin` — Dhammaan dadka DM u dir (Owner)',
+          '`!grant @user <amount>` — Lacag u dar qof (Owner)',
         ].join('\n') },
       )
       .setFooter({ text: 'Ciyaal Xamar Bot · !icaawi haddaad caawimaad u baahantahay' });
