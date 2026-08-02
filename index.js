@@ -145,7 +145,7 @@ async function handleAllMessages(msg) {
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
-    const user = await db.getUser(msg.author.id);
+    const user = await db.getUser(msg.author.id, msg.author.username);
     if (user.jailUntil > Date.now()) {
       const remaining = Math.ceil((user.jailUntil - Date.now()) / 60000);
       return msg.reply(`🚔 Waxaad ku jirtaa Xabsi! Waxaad u baahan tahay **${remaining}** daqiiqo oo dheeraad ah. Isticmaal \`!jailbuy\` si aad u baxdo.`);
@@ -241,7 +241,7 @@ async function handleAllMessages(msg) {
       case 'rob': {
         const target = msg.mentions.users.first();
         if (!target || target.bot || target.id === msg.author.id) return msg.reply('❌ Fadlan mention garee qof aad rabto inaad dhacdo.');
-        const targetData = await db.getUser(target.id);
+        const targetData = await db.getUser(target.id, target.username);
         if (targetData.shieldUntil > Date.now()) return msg.reply(`🛡️ ${target.toString()} wuxuu leeyahay Shield, ma dhici kartid!`);
         if (targetData.wallet < 100) return msg.reply(`❌ ${target.toString()} lacag ku filan ma haysto (ugu yaraan $100).`);
         const robCooldown = 5 * 60 * 1000;

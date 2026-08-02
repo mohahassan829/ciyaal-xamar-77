@@ -16,6 +16,7 @@ const dbHelper = {
       await client.query(`
         CREATE TABLE IF NOT EXISTS economy_users (
           userId TEXT PRIMARY KEY,
+          username TEXT,
           wallet BIGINT DEFAULT 0,
           bank BIGINT DEFAULT 500,
           diamonds INTEGER DEFAULT 0,
@@ -27,19 +28,24 @@ const dbHelper = {
           hasPlayedCX INTEGER DEFAULT 0
         )
       `);
+      // Ensure username column exists if table was created before
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
       console.log('✅ PostgreSQL Database initialized successfully.');
     } finally {
       client.release();
     }
   },
 
-  getUser: async (userId) => {
+  getUser: async (userId, username = null) => {
     const res = await pool.query('SELECT * FROM economy_users WHERE userId = $1', [userId]);
     let user = res.rows[0];
     if (!user) {
-      await pool.query('INSERT INTO economy_users (userId, lastTax, bank) VALUES ($1, $2, $3)', [userId, Date.now(), 500]);
+      await pool.query('INSERT INTO economy_users (userId, username, lastTax, bank) VALUES ($1, $2, $3, $4)', [userId, username, Date.now(), 500]);
       const newRes = await pool.query('SELECT * FROM economy_users WHERE userId = $1', [userId]);
       user = newRes.rows[0];
+    } else if (username && user.username !== username) {
+      await pool.query('UPDATE economy_users SET username = $2 WHERE userId = $1', [userId, username]);
+      user.username = username;
     }
     // Convert string BIGINTs to numbers
     return {
