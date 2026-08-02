@@ -1,45 +1,64 @@
-import sqlite3 from 'sqlite3';
-import { open } from 'sqlite';
+import pg from 'pg';
+const { Pool } = pg;
 
-let db;
+// Railway automatically provides DATABASE_URL in the environment
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: {
+    rejectUnauthorized: false
+  }
+});
 
 const dbHelper = {
   init: async () => {
-    db = await open({
-      filename: 'economy.db',
-      driver: sqlite3.Database
-    });
-
-    await db.exec(`
-      CREATE TABLE IF NOT EXISTS users (
-        userId TEXT PRIMARY KEY,
-        wallet INTEGER DEFAULT 0,
-        bank INTEGER DEFAULT 500,
-        diamonds INTEGER DEFAULT 0,
-        shieldUntil INTEGER DEFAULT 0,
-        jailUntil INTEGER DEFAULT 0,
-        lastWork INTEGER DEFAULT 0,
-        lastDaily INTEGER DEFAULT 0,
-        lastTax INTEGER DEFAULT 0,
-        hasPlayedCX INTEGER DEFAULT 0
-      )
-    `);
+    const client = await pool.connect();
+    try {
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS economy_users (
+          userId TEXT PRIMARY KEY,
+          wallet BIGINT DEFAULT 0,
+          bank BIGINT DEFAULT 500,
+          diamonds INTEGER DEFAULT 0,
+          shieldUntil BIGINT DEFAULT 0,
+          jailUntil BIGINT DEFAULT 0,
+          lastWork BIGINT DEFAULT 0,
+          lastDaily BIGINT DEFAULT 0,
+          lastTax BIGINT DEFAULT 0,
+          hasPlayedCX INTEGER DEFAULT 0
+        )
+      `);
+      console.log('✅ PostgreSQL Database initialized successfully.');
+    } finally {
+      client.release();
+    }
   },
 
   getUser: async (userId) => {
-    let user = await db.get('SELECT * FROM users WHERE userId = ?', userId);
+    const res = await pool.query('SELECT * FROM economy_users WHERE userId = $1', [userId]);
+    let user = res.rows[0];
     if (!user) {
-      await db.run('INSERT INTO users (userId, lastTax, bank) VALUES (?, ?, ?)', userId, Date.now(), 500);
-      user = await db.get('SELECT * FROM users WHERE userId = ?', userId);
+      await pool.query('INSERT INTO economy_users (userId, lastTax, bank) VALUES ($1, $2, $3)', [userId, Date.now(), 500]);
+      const newRes = await pool.query('SELECT * FROM economy_users WHERE userId = $1', [userId]);
+      user = newRes.rows[0];
     }
-    return user;
+    // Convert string BIGINTs to numbers
+    return {
+      ...user,
+      wallet: parseInt(user.wallet),
+      bank: parseInt(user.bank),
+      shieldUntil: parseInt(user.shielduntil),
+      jailUntil: parseInt(user.jailuntil),
+      lastWork: parseInt(user.lastwork),
+      lastDaily: parseInt(user.lastdaily),
+      lastTax: parseInt(user.lasttax)
+    };
   },
 
   updateUser: async (userId, data) => {
     const keys = Object.keys(data);
     const values = Object.values(data);
-    const setClause = keys.map(key => `${key} = ?`).join(', ');
-    await db.run(`UPDATE users SET ${setClause} WHERE userId = ?`, ...values, userId);
+    const setClause = keys.map((key, i) => `${key.toLowerCase()} = $${i + 2}`).join(', ');
+    await pool.query(`UPDATE economy_users SET ${setClause} WHERE userId = $1`, [userId, ...values]);
   },
 
   addWallet: async (userId, amount) => {
@@ -73,11 +92,23 @@ const dbHelper = {
   },
 
   getTopRich: async (limit = 10) => {
-    return await db.all('SELECT userId, (wallet + bank) as total FROM users ORDER BY total DESC LIMIT ?', limit);
+    const res = await pool.query('SELECT userId, (wallet + bank) as total FROM economy_users ORDER BY total DESC LIMIT $1', [limit]);
+    return res.rows.map(row => ({
+        userId: row.userid,
+        total: parseInt(row.total)
+    }));
   },
 
   getAllUsers: async () => {
-    return await db.all('SELECT * FROM users');
+    const res = await pool.query('SELECT * FROM economy_users');
+    return res.rows.map(user => ({
+      ...user,
+      userId: user.userid,
+      wallet: parseInt(user.wallet),
+      bank: parseInt(user.bank),
+      hasPlayedCX: user.hasplayedcx,
+      lastTax: parseInt(user.lasttax)
+    }));
   }
 };
 
