@@ -22,6 +22,11 @@ import { deployCommands } from './bot/deploy.js';
 // ── Economy System imports ──────────────────────────────────────────────────────
 import db from './db.js';
 import * as econUtils from './economyUtils.js';
+import DashboardWebSocketClient from './websocket-client.js';
+
+// ── WebSocket client for dashboard ────────────────────────────────────────────
+const dashboardWS = new DashboardWebSocketClient(process.env.DASHBOARD_URL || 'http://localhost:3000');
+dashboardWS.connect().catch(err => console.warn('[Bot] Dashboard WebSocket connection failed:', err));
 
 // ─────────────────────────────────────────────────────────────────────────────
 const token   = process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
@@ -266,6 +271,18 @@ async function handleAllMessages(msg) {
           serverName: msg.guild.name,
           channelId: msg.channel.id
         });
+        // Emit WebSocket event to dashboard
+        dashboardWS.emitCXGame(
+          msg.author.id,
+          msg.author.username,
+          msg.guild.id,
+          msg.guild.name,
+          msg.channel.id,
+          amount,
+          choice === 'm' ? 'Madax' : 'Xarash',
+          result === 'm' ? 'Madax' : 'Xarash',
+          win
+        );
         if (win) {
           await db.addWallet(msg.author.id, amount);
           return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**`, econUtils.config.colors.success)] });
