@@ -12,7 +12,7 @@ const dbHelper = {
   init: async () => {
     const client = await pool.connect();
     try {
-      // Use lowercase for all column names to avoid Postgres case sensitivity issues
+      // Main users table
       await client.query(`
         CREATE TABLE IF NOT EXISTS economy_users (
           userid TEXT PRIMARY KEY,
@@ -28,11 +28,57 @@ const dbHelper = {
           hasplayedcx INTEGER DEFAULT 0
         )
       `);
-      
-      // Explicitly add username column if it doesn't exist (for existing tables)
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
       
-      console.log('✅ PostgreSQL Database initialized and username column verified.');
+      // Give logs table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS give_logs (
+          id SERIAL PRIMARY KEY,
+          sender_id TEXT,
+          sender_name TEXT,
+          receiver_id TEXT,
+          receiver_name TEXT,
+          amount BIGINT,
+          server_id TEXT,
+          server_name TEXT,
+          channel_id TEXT,
+          timestamp BIGINT
+        )
+      `);
+
+      // CX logs table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS cx_logs (
+          id SERIAL PRIMARY KEY,
+          userid TEXT,
+          username TEXT,
+          amount BIGINT,
+          choice TEXT,
+          result TEXT,
+          win INTEGER,
+          server_id TEXT,
+          server_name TEXT,
+          channel_id TEXT,
+          timestamp BIGINT
+        )
+      `);
+
+      // General activity logs table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS activity_logs (
+          id SERIAL PRIMARY KEY,
+          userid TEXT,
+          username TEXT,
+          type TEXT,
+          description TEXT,
+          amount BIGINT DEFAULT 0,
+          diamonds INTEGER DEFAULT 0,
+          server_id TEXT,
+          timestamp BIGINT
+        )
+      `);
+
+      console.log('✅ PostgreSQL Database initialized with logging tables.');
     } catch (err) {
       console.error('❌ Database Init Error:', err);
     } finally {
@@ -74,7 +120,6 @@ const dbHelper = {
   updateUser: async (userId, data) => {
     const keys = Object.keys(data);
     const values = Object.values(data);
-    // Map keys to lowercase to match DB columns
     const setClause = keys.map((key, i) => `${key.toLowerCase()} = $${i + 2}`).join(', ');
     await pool.query(`UPDATE economy_users SET ${setClause} WHERE userid = $1`, [userId, ...values]);
   },
@@ -109,6 +154,31 @@ const dbHelper = {
     await dbHelper.updateUser(userId, { diamonds: Math.max(0, user.diamonds - amount) });
   },
 
+  // Logging methods
+  logGive: async (data) => {
+    await pool.query(
+      `INSERT INTO give_logs (sender_id, sender_name, receiver_id, receiver_name, amount, server_id, server_name, channel_id, timestamp) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+      [data.senderId, data.senderName, data.receiverId, data.receiverName, data.amount, data.serverId, data.serverName, data.channelId, Date.now()]
+    );
+  },
+
+  logCX: async (data) => {
+    await pool.query(
+      `INSERT INTO cx_logs (userid, username, amount, choice, result, win, server_id, server_name, channel_id, timestamp) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      [data.userId, data.username, data.amount, data.choice, data.result, data.win ? 1 : 0, data.serverId, data.serverName, data.channelId, Date.now()]
+    );
+  },
+
+  logActivity: async (data) => {
+    await pool.query(
+      `INSERT INTO activity_logs (userid, username, type, description, amount, diamonds, server_id, timestamp) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [data.userId, data.username, data.type, data.description, data.amount || 0, data.diamonds || 0, data.serverId, Date.now()]
+    );
+  },
+
   getTopRich: async (limit = 10) => {
     const res = await pool.query(
       'SELECT userid, username, (wallet + bank) as total FROM economy_users ORDER BY total DESC LIMIT $1', 
@@ -131,6 +201,22 @@ const dbHelper = {
       hasPlayedCX: user.hasplayedcx,
       lastTax: parseInt(user.lasttax || 0)
     }));
+  },
+
+  // Methods for Dashboard
+  getStats: async () => {
+    const usersCount = await pool.query('SELECT COUNT(*) FROM economy_users');
+    const totalWallet = await pool.query('SELECT SUM(wallet) FROM economy_users');
+    const totalBank = await pool.query('SELECT SUM(bank) FROM economy_users');
+    const totalDiamonds = await pool.query('SELECT SUM(diamonds) FROM economy_users');
+    const totalCX = await pool.query('SELECT COUNT(*) FROM cx_logs');
+    
+    return {
+      totalUsers: parseInt(usersCount.rows[0].count),
+      totalCash: parseInt(totalWallet.rows[0].sum || 0) + parseInt(totalBank.rows[0].sum || 0),
+      totalDiamonds: parseInt(totalDiamonds.rows[0].sum || 0),
+      totalGames: parseInt(totalCX.rows[0].count)
+    };
   }
 };
 

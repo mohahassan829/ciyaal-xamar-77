@@ -90,6 +90,13 @@ async function checkTaxes() {
           await discordUser.send({ embeds: [taxEmbed] });
         } catch (err) {}
       }
+      await db.logActivity({
+        userId: user.userId,
+        username: user.username,
+        type: 'tax',
+        description: '3-Day Tax Deduction',
+        amount: econUtils.config.taxAmount
+      });
     }
   }
 }
@@ -174,6 +181,14 @@ async function handleAllMessages(msg) {
         }
         await db.addWallet(msg.author.id, 200);
         await db.updateUser(msg.author.id, { lastWork: Date.now() });
+        await db.logActivity({
+          userId: msg.author.id,
+          username: msg.author.username,
+          type: 'work',
+          description: 'Daily work reward',
+          amount: 200,
+          serverId: msg.guild.id
+        });
         return msg.reply('💼 Waxaad shaqeysay maanta, waxaadna heshay **$200 Cash**!');
       }
       case 'daily': {
@@ -207,6 +222,15 @@ async function handleAllMessages(msg) {
               rewardText = `$${amount} Cash`;
             }
             await db.updateUser(msg.author.id, { lastDaily: Date.now() });
+            await db.logActivity({
+              userId: msg.author.id,
+              username: msg.author.username,
+              type: 'daily',
+              description: `Daily gift: ${rewardText}`,
+              amount: isDiamond ? 0 : parseInt(rewardText.replace(/[^0-9]/g, '')),
+              diamonds: isDiamond ? parseInt(rewardText.replace(/[^0-9]/g, '')) : 0,
+              serverId: msg.guild.id
+            });
             const successEmbed = econUtils.createEmbed('🎁 Daily Claimed', `Waxaad heshay: **${rewardText}**!`);
             await i.update({ embeds: [successEmbed], components: [] });
             try { await msg.author.send({ embeds: [successEmbed] }); } catch(e) {}
@@ -230,7 +254,19 @@ async function handleAllMessages(msg) {
         const resultName = result === 'm' ? 'Madax (M)' : 'Xarash (X)';
         const choiceName = choice === 'm' ? 'Madax (M)' : 'Xarash (X)';
         await db.updateUser(msg.author.id, { hasPlayedCX: 1 });
-        if (choice === result) {
+        const win = choice === result;
+        await db.logCX({
+          userId: msg.author.id,
+          username: msg.author.username,
+          amount,
+          choice: choiceName,
+          result: resultName,
+          win,
+          serverId: msg.guild.id,
+          serverName: msg.guild.name,
+          channelId: msg.channel.id
+        });
+        if (win) {
           await db.addWallet(msg.author.id, amount);
           return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**`, econUtils.config.colors.success)] });
         } else {
@@ -255,12 +291,34 @@ async function handleAllMessages(msg) {
           const amount = Math.floor(Math.random() * (targetData.wallet * 0.5)) + 50;
           await db.removeWallet(target.id, amount);
           await db.addWallet(msg.author.id, amount);
+          await db.logActivity({
+            userId: msg.author.id,
+            username: msg.author.username,
+            type: 'rob_success',
+            description: `Successfully robbed ${target.username}`,
+            amount,
+            serverId: msg.guild.id
+          });
           return msg.reply(`✅ Waad ku guuleysatay! Waxaad ka xaday ${target.toString()} lacag dhan **$${amount.toLocaleString()}**.`);
         } else if (rand < 0.7) {
+          await db.logActivity({
+            userId: msg.author.id,
+            username: msg.author.username,
+            type: 'rob_fail',
+            description: `Failed to rob ${target.username}`,
+            serverId: msg.guild.id
+          });
           return msg.reply(`❌ Fashilmay! Waxba ma aadan helin.`);
         } else {
           const jailTime = Math.floor(Math.random() * 10) + 1;
           await db.updateUser(msg.author.id, { jailUntil: Date.now() + (jailTime * 60 * 1000) });
+          await db.logActivity({
+            userId: msg.author.id,
+            username: msg.author.username,
+            type: 'rob_jail',
+            description: `Caught robbing ${target.username} and jailed for ${jailTime}m`,
+            serverId: msg.guild.id
+          });
           return msg.reply(`🚔 Jail! Booliska ayaa ku qabtay, waxaadna xirnaan doontaa **${jailTime} daqiiqo**.`);
         }
       }
@@ -277,6 +335,14 @@ async function handleAllMessages(msg) {
         if (user.diamonds < 25) return msg.reply('❌ Ma haysatid Diamonds ku filan (25 💎 ayaa loo baahan yahay).');
         await db.removeDiamonds(msg.author.id, 25);
         await db.updateUser(msg.author.id, { shieldUntil: Date.now() + (24 * 60 * 60 * 1000) });
+        await db.logActivity({
+          userId: msg.author.id,
+          username: msg.author.username,
+          type: 'shop_shield',
+          description: 'Purchased 24h Shield',
+          diamonds: 25,
+          serverId: msg.guild.id
+        });
         return msg.reply('🛡️ Waxaad iibsatay Shield! Waxaad ka badbaadaysaa dhaca muddo **24 saacadood** ah.');
       }
       case 'buycash': {
@@ -287,6 +353,15 @@ async function handleAllMessages(msg) {
         if (user.diamonds < cost) return msg.reply(`❌ Ma haysatid Diamonds ku filan (${cost} 💎 ayaa loo baahan yahay).`);
         await db.removeDiamonds(msg.author.id, cost);
         await db.addWallet(msg.author.id, amount);
+        await db.logActivity({
+          userId: msg.author.id,
+          username: msg.author.username,
+          type: 'shop_cash',
+          description: `Exchanged ${cost} diamonds for $${amount} cash`,
+          amount,
+          diamonds: cost,
+          serverId: msg.guild.id
+        });
         return msg.reply(`💰 Waxaad ku beddelatay ${cost} 💎 lacag dhan **$${amount} Cash**.`);
       }
       case 'jailbuy': {
@@ -302,6 +377,14 @@ async function handleAllMessages(msg) {
           await db.removeBank(msg.author.id, price);
           const newJailUntil = Math.max(Date.now(), user.jailUntil - (manualMinutes * 60 * 1000));
           await db.updateUser(msg.author.id, { jailUntil: newJailUntil });
+          await db.logActivity({
+            userId: msg.author.id,
+            username: msg.author.username,
+            type: 'jailbuy',
+            description: `Paid $${price} to reduce jail by ${manualMinutes}m`,
+            amount: price,
+            serverId: msg.guild.id
+          });
           return msg.reply({ embeds: [econUtils.createEmbed('✅ Xabsiga waa lagaa dhimay', `Waxaad bixisay **$${price}**, waxaana lagaa dhimay **${manualMinutes} daqiiqo**.`)] });
         }
 
@@ -351,6 +434,16 @@ async function handleAllMessages(msg) {
         if (!amount || amount > user.wallet) return msg.reply('❌ Lacagta aad dirayso ma saxna ama wallet-kaaga kuma filna.');
         await db.removeWallet(msg.author.id, amount);
         await db.addWallet(target.id, amount);
+        await db.logGive({
+          senderId: msg.author.id,
+          senderName: msg.author.username,
+          receiverId: target.id,
+          receiverName: target.username,
+          amount,
+          serverId: msg.guild.id,
+          serverName: msg.guild.name,
+          channelId: msg.channel.id
+        });
         return msg.reply(`💸 Waxaad u dirtay **$${amount.toLocaleString()}** ${target.toString()}.`);
       }
       case 'rank': {
@@ -365,6 +458,14 @@ async function handleAllMessages(msg) {
         const amount = parseInt(args[2] || '');
         if (!target || isNaN(amount)) return msg.reply('❌ Tusaale: `!grant @user 1000`');
         await db.addWallet(target.id, amount);
+        await db.logActivity({
+          userId: target.id,
+          username: target.username,
+          type: 'grant',
+          description: `Admin granted $${amount}`,
+          amount,
+          serverId: msg.guild.id
+        });
         return msg.reply(`👑 Owner: Waxaad u dartay **$${amount.toLocaleString()}** ${target.toString()}.`);
       }
       case 'deduct': {
@@ -374,6 +475,14 @@ async function handleAllMessages(msg) {
         const amount = parseInt(args[2] || '');
         if (!target || isNaN(amount)) return msg.reply('❌ Tusaale: `!deduct @user 1000`');
         await db.removeWallet(target.id, amount);
+        await db.logActivity({
+          userId: target.id,
+          username: target.username,
+          type: 'deduct',
+          description: `Admin deducted $${amount}`,
+          amount,
+          serverId: msg.guild.id
+        });
         return msg.reply(`👑 Owner: Waxaad ka jartay **$${amount.toLocaleString()}** ${target.toString()}.`);
       }
     }
