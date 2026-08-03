@@ -1,4 +1,4 @@
-const io = require('socket.io-client');
+import { io } from 'socket.io-client';
 
 class DashboardWebSocketClient {
   constructor(dashboardUrl = 'http://localhost:3000') {
@@ -197,4 +197,4 @@ class DashboardWebSocketClient {
   }
 }
 
-module.exports = DashboardWebSocketClient;
+export default DashboardWebSocketClient;
