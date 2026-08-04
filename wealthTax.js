@@ -88,7 +88,7 @@ function applyHighRollerRisk(amount, totalWealth) {
   };
 }
 
-module.exports = {
+export {
   TAX_TIERS,
   generateTaxTiers,
   getNextTaxTier,
