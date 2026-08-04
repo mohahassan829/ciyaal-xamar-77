@@ -23,6 +23,7 @@ import { deployCommands } from './bot/deploy.js';
 import db from './db.js';
 import * as econUtils from './economyUtils.js';
 import DashboardWebSocketClient from './websocket-client.js';
+import { calculateWealthTax, applyHighRollerRisk } from './wealthTax.js';
 
 // ── WebSocket client for dashboard ────────────────────────────────────────────
 const dashboardWS = new DashboardWebSocketClient(process.env.DASHBOARD_URL || 'http://localhost:3000');
@@ -285,10 +286,24 @@ async function handleAllMessages(msg) {
         );
         if (win) {
           await db.addWallet(msg.author.id, amount);
-          return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**`, econUtils.config.colors.success)] });
+          const updatedUser = await db.getUser(msg.author.id, msg.author.username);
+          const totalWealth = parseInt(updatedUser.wallet || 0) + parseInt(updatedUser.bank || 0);
+          const currentTaxLevel = await db.getWealthTaxLevel(msg.author.id);
+          const taxInfo = calculateWealthTax(totalWealth, currentTaxLevel);
+          
+          let taxMessage = '';
+          if (taxInfo.shouldTax) {
+            await db.removeWallet(msg.author.id, taxInfo.taxAmount);
+            await db.updateWealthTaxLevel(msg.author.id, taxInfo.newTaxLevel);
+            await db.logWealthTax(msg.author.id, msg.author.username, taxInfo.tier, taxInfo.taxAmount);
+            taxMessage = `\n\n🏛️ Government Wealth Tax\nWaxaad gaartay heerka $${taxInfo.tier.toLocaleString()}+, sidaas darteed Dowladda ayaa si toos ah uga jartay $${taxInfo.taxAmount.toLocaleString()} Cash.`;
+            try { await msg.author.send({ embeds: [econUtils.createEmbed('🏛️ Government Wealth Tax', `Waxaad gaartay heerka $${taxInfo.tier.toLocaleString()}+\n\nCanshuurta: $${taxInfo.taxAmount.toLocaleString()} Cash\nLacagta hadda kuu hartay: $${(totalWealth - taxInfo.taxAmount).toLocaleString()} Cash`)] }); } catch(e) {}
+          }
+          
+          return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**${taxMessage}`, econUtils.config.colors.success)] });
         } else {
           await db.removeWallet(msg.author.id, amount);
-          return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] });
+          return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] ]);
         }
       }
       case 'rob': {

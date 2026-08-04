@@ -25,10 +25,12 @@ const dbHelper = {
           lastwork BIGINT DEFAULT 0,
           lastdaily BIGINT DEFAULT 0,
           lasttax BIGINT DEFAULT 0,
-          hasplayedcx INTEGER DEFAULT 0
+          hasplayedcx INTEGER DEFAULT 0,
+          wealth_tax_level INTEGER DEFAULT 0
         )
       `);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS wealth_tax_level INTEGER DEFAULT 0`);
       
       // Give logs table
       await client.query(`
@@ -74,6 +76,18 @@ const dbHelper = {
           amount BIGINT DEFAULT 0,
           diamonds INTEGER DEFAULT 0,
           server_id TEXT,
+          timestamp BIGINT
+        )
+      `);
+
+      // Wealth tax history table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS wealth_tax_history (
+          id SERIAL PRIMARY KEY,
+          userid TEXT,
+          username TEXT,
+          tax_level INTEGER,
+          amount_taxed BIGINT,
           timestamp BIGINT
         )
       `);
@@ -204,6 +218,28 @@ const dbHelper = {
   },
 
   // Methods for Dashboard
+  updateWealthTaxLevel: async (userId, newTaxLevel) => {
+    await pool.query(
+      'UPDATE economy_users SET wealth_tax_level = $1 WHERE userid = $2',
+      [newTaxLevel, userId]
+    );
+  },
+
+  logWealthTax: async (userId, username, taxLevel, amountTaxed) => {
+    await pool.query(
+      'INSERT INTO wealth_tax_history (userid, username, tax_level, amount_taxed, timestamp) VALUES ($1, $2, $3, $4, $5)',
+      [userId, username, taxLevel, amountTaxed, Date.now()]
+    );
+  },
+
+  getWealthTaxLevel: async (userId) => {
+    const res = await pool.query(
+      'SELECT wealth_tax_level FROM economy_users WHERE userid = $1',
+      [userId]
+    );
+    return res.rows.length > 0 ? parseInt(res.rows[0].wealth_tax_level || 0) : 0;
+  },
+
   getStats: async () => {
     const usersCount = await pool.query('SELECT COUNT(*) FROM economy_users');
     const totalWallet = await pool.query('SELECT SUM(wallet) FROM economy_users');
