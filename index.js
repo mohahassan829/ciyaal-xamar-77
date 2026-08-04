@@ -303,7 +303,7 @@ async function handleAllMessages(msg) {
           return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**${taxMessage}`, econUtils.config.colors.success)] });
         } else {
           await db.removeWallet(msg.author.id, amount);
-          return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] ]);
+          return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] });
         }
       }
       case 'rob': {
