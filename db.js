@@ -26,11 +26,13 @@ const dbHelper = {
           lastdaily BIGINT DEFAULT 0,
           lasttax BIGINT DEFAULT 0,
           hasplayedcx INTEGER DEFAULT 0,
-          wealth_tax_level INTEGER DEFAULT 0
+          wealth_tax_level INTEGER DEFAULT 0,
+          hasclaimeddrop INTEGER DEFAULT 0
         )
       `);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS wealth_tax_level INTEGER DEFAULT 0`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS hasclaimeddrop INTEGER DEFAULT 0`);
       
       // Give logs table
       await client.query(`
@@ -127,7 +129,8 @@ const dbHelper = {
       lastWork: parseInt(user.lastwork || 0),
       lastDaily: parseInt(user.lastdaily || 0),
       lastTax: parseInt(user.lasttax || 0),
-      hasPlayedCX: user.hasplayedcx
+      hasPlayedCX: user.hasplayedcx,
+      hasClaimedDrop: user.hasclaimeddrop
     };
   },
 
@@ -213,6 +216,7 @@ const dbHelper = {
       wallet: parseInt(user.wallet || 0),
       bank: parseInt(user.bank || 0),
       hasPlayedCX: user.hasplayedcx,
+      hasClaimedDrop: user.hasclaimeddrop,
       lastTax: parseInt(user.lasttax || 0)
     }));
   },

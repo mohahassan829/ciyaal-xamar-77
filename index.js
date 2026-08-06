@@ -154,7 +154,7 @@ async function handleAllMessages(msg) {
   const isOwner   = msg.author.id === OWNER_ID;
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -165,6 +165,27 @@ async function handleAllMessages(msg) {
     }
 
     switch (cmd) {
+      case 'drop': {
+        if (!user.hasPlayedCX) {
+          return msg.reply('❌failed');
+        }
+        if (user.hasClaimedDrop) {
+          return msg.reply('❌ Waxaad hore u isticmaashay !drop. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.');
+        }
+        
+        await db.addWallet(msg.author.id, 10000);
+        await db.updateUser(msg.author.id, { hasclaimeddrop: 1 });
+        await db.logActivity({
+          userId: msg.author.id,
+          username: msg.author.username,
+          type: 'drop_claim',
+          description: 'Claimed !drop reward',
+          amount: 10000,
+          serverId: msg.guild.id
+        });
+        
+        return msg.reply('🎉 Hambalyo!\nWaxaad heshay 10,000 Cash adigoo isticmaalay !drop.');
+      }
       case 'wallet': {
         const shieldStatus = user.shieldUntil > Date.now() ? '🛡️ **Active**' : '🔓 **Inactive**';
         const walletEmbed = new EmbedBuilder()
@@ -550,6 +571,7 @@ async function handleAllMessages(msg) {
           '`!bank` — `!dep <amount>` ama `!with <amount>`',
           '`!shop` — Shield ama Cash iibso',
           '`!rank` — Top 10 Richest Players',
+          '`!drop` — Reward system ($10,000)',
         ].join('\n') },
         { name: '📊 Owner Commands', value: [
           '`!dashboard` — Serverrada bot ku jira oo dhan arag (Owner kaliya)',
