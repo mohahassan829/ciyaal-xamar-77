@@ -32,6 +32,7 @@ dashboardWS.connect().catch(err => console.warn('[Bot] Dashboard WebSocket conne
 // ─────────────────────────────────────────────────────────────────────────────
 const token   = process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID  || '725076744251637760';
+const ADMIN_IDS = ['1307382619696267294', '725076744251637760'];
 const MAX_GAMES_PER_GUILD = 5;
 
 if (!token) {
@@ -152,9 +153,10 @@ async function handleAllMessages(msg) {
   const channelId = msg.channel.id;
   const guildId   = msg.guild.id;
   const isOwner   = msg.author.id === OWNER_ID;
+  const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -505,7 +507,7 @@ async function handleAllMessages(msg) {
         return msg.reply({ embeds: [econUtils.createEmbed('🏆 Top 10 Richest Players', desc || 'Ma jiro qof weli liiska ku jira.', econUtils.config.colors.economy)] });
       }
       case 'grant': {
-        if (!isOwner) return;
+        if (!isAdmin) return;
         const args = msg.content.split(/ +/);
         const target = msg.mentions.users.first();
         const amount = parseInt(args[2] || '');
@@ -519,15 +521,26 @@ async function handleAllMessages(msg) {
           amount,
           serverId: msg.guild.id
         });
-        return msg.reply(`👑 Owner: Waxaad u dartay **$${amount.toLocaleString()}** ${target.toString()}.`);
+        return msg.reply(`👑 Admin: Waxaad u dartay **$${amount.toLocaleString()}** ${target.toString()}.`);
       }
       case 'deduct': {
-        if (!isOwner) return;
+        if (!isAdmin) return;
         const args = msg.content.split(/ +/);
         const target = msg.mentions.users.first();
         const amount = parseInt(args[2] || '');
         if (!target || isNaN(amount)) return msg.reply('❌ Tusaale: `!deduct @user 1000`');
-        await db.removeWallet(target.id, amount);
+        
+        const targetUser = await db.getUser(target.id, target.username);
+        // Deduct from wallet first, then bank if needed
+        let remainingDeduct = amount;
+        let walletDeduct = Math.min(targetUser.wallet, remainingDeduct);
+        await db.removeWallet(target.id, walletDeduct);
+        remainingDeduct -= walletDeduct;
+        
+        if (remainingDeduct > 0) {
+          await db.removeBank(target.id, remainingDeduct);
+        }
+
         await db.logActivity({
           userId: target.id,
           username: target.username,
@@ -536,7 +549,24 @@ async function handleAllMessages(msg) {
           amount,
           serverId: msg.guild.id
         });
-        return msg.reply(`👑 Owner: Waxaad ka jartay **$${amount.toLocaleString()}** ${target.toString()}.`);
+        return msg.reply(`👑 Admin: Waxaad ka jartay **$${amount.toLocaleString()}** ${target.toString()}.`);
+      }
+      case 'jail': {
+        if (!isAdmin) return;
+        const args = msg.content.split(/ +/);
+        const target = msg.mentions.users.first();
+        const minutes = parseInt(args[2] || '');
+        if (!target || isNaN(minutes)) return msg.reply('❌ Tusaale: `!jail @user 10`');
+        
+        await db.updateUser(target.id, { jailUntil: Date.now() + (minutes * 60 * 1000) });
+        await db.logActivity({
+          userId: target.id,
+          username: target.username,
+          type: 'admin_jail',
+          description: `Admin jailed for ${minutes}m`,
+          serverId: msg.guild.id
+        });
+        return msg.reply(`🚔 Admin: Waxaad xirtay ${target.toString()} muddo **${minutes} daqiiqo** ah.`);
       }
     }
   }
@@ -573,11 +603,13 @@ async function handleAllMessages(msg) {
           '`!rank` — Top 10 Richest Players',
           '`!drop` — Reward system ($10,000)',
         ].join('\n') },
-        { name: '📊 Owner Commands', value: [
+        { name: '📊 Admin/Owner Commands', value: [
           '`!dashboard` — Serverrada bot ku jira oo dhan arag (Owner kaliya)',
           '`!dm @qof farriin` — DM gaar ah (Owner)',
           '`!news farriin` — Dhammaan dadka DM u dir (Owner)',
-          '`!grant @user <amount>` — Lacag u dar qof (Owner)',
+          '`!grant @user <amount>` — Lacag u dar qof (Admin)',
+          '`!deduct @user <amount>` — Lacag ka jar qof (Admin)',
+          '`!jail @user <minutes>` — Qof xabsi u dir (Admin)',
         ].join('\n') },
       )
       .setFooter({ text: 'Ciyaal Xamar Bot · !icaawi haddaad caawimaad u baahantahay' });
