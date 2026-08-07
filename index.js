@@ -156,7 +156,7 @@ async function handleAllMessages(msg) {
   const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail', 'jailremoved'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -568,6 +568,34 @@ async function handleAllMessages(msg) {
         });
         return msg.reply(`🚔 Admin: Waxaad xirtay ${target.toString()} muddo **${minutes} daqiiqo** ah.`);
       }
+      case 'jailremoved': {
+        if (!isAdmin) return;
+        const args = msg.content.split(/ +/);
+        const target = msg.mentions.users.first();
+        const minutes = parseInt(args[2] || '');
+        if (!target || isNaN(minutes)) return msg.reply('❌ Tusaale: `!jailremoved @user 10`');
+        
+        const targetUser = await db.getUser(target.id, target.username);
+        if (targetUser.jailUntil <= Date.now()) return msg.reply('❌ Qofkani kuma jiro xabsi!');
+        
+        const newJailUntil = Math.max(Date.now(), targetUser.jailUntil - (minutes * 60 * 1000));
+        await db.updateUser(target.id, { jailUntil: newJailUntil });
+        
+        await db.logActivity({
+          userId: target.id,
+          username: target.username,
+          type: 'admin_unjail',
+          description: `Admin reduced jail by ${minutes}m`,
+          serverId: msg.guild.id
+        });
+        
+        const remaining = Math.ceil((newJailUntil - Date.now()) / 60000);
+        if (remaining <= 0) {
+          return msg.reply(`🔓 Admin: Waxaad xabsiga ka saartay ${target.toString()}.`);
+        } else {
+          return msg.reply(`🔓 Admin: Waxaad ${target.toString()} ka dhimay **${minutes} daqiiqo**. Waxaa u haray **${remaining} daqiiqo**.`);
+        }
+      }
     }
   }
 
@@ -610,6 +638,7 @@ async function handleAllMessages(msg) {
           '`!grant @user <amount>` — Lacag u dar qof (Admin)',
           '`!deduct @user <amount>` — Lacag ka jar qof (Admin)',
           '`!jail @user <minutes>` — Qof xabsi u dir (Admin)',
+          '`!jailremoved @user <minutes>` — Xabsiga ka dhim ama ka saar (Admin)',
         ].join('\n') },
       )
       .setFooter({ text: 'Ciyaal Xamar Bot · !icaawi haddaad caawimaad u baahantahay' });
