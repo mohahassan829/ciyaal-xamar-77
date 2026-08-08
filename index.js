@@ -279,7 +279,17 @@ async function handleAllMessages(msg) {
           return msg.reply(`⏳ Fadlan sug **${Math.ceil((cxCooldown - (Date.now() - lastCX)) / 1000)}s** si aad mar kale u ciyaarto.`);
         }
         economyCooldowns.set(`${msg.author.id}_cx`, Date.now());
-        const result = Math.random() < 0.5 ? 'm' : 'x';
+        
+        // Event: 90% Loss Rate for 48 Hours (Ends Aug 10, 2026)
+        const EVENT_END = 1786386940000;
+        let result;
+        if (Date.now() < EVENT_END) {
+          const winChance = Math.random() < 0.1; // 10% win = 90% loss
+          result = winChance ? choice : (choice === 'm' ? 'x' : 'm');
+        } else {
+          result = Math.random() < 0.5 ? 'm' : 'x';
+        }
+
         const resultName = result === 'm' ? 'Madax (M)' : 'Xarash (X)';
         const choiceName = choice === 'm' ? 'Madax (M)' : 'Xarash (X)';
         await db.updateUser(msg.author.id, { hasPlayedCX: 1 });
