@@ -94,7 +94,34 @@ const dbHelper = {
         )
       `);
 
-      console.log('✅ PostgreSQL Database initialized with logging tables.');
+      // Number Box (NB) Games table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nb_games (
+          id SERIAL PRIMARY KEY,
+          guild_id TEXT,
+          winning_number INTEGER,
+          winners_count INTEGER DEFAULT 0,
+          max_winners INTEGER DEFAULT 5,
+          prize BIGINT DEFAULT 100000,
+          expires_at BIGINT,
+          is_active INTEGER DEFAULT 1,
+          message_id TEXT
+        )
+      `);
+
+      // Number Box Participants table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS nb_participants (
+          id SERIAL PRIMARY KEY,
+          game_id INTEGER,
+          user_id TEXT,
+          username TEXT,
+          is_winner INTEGER DEFAULT 0,
+          timestamp BIGINT
+        )
+      `);
+
+      console.log('✅ PostgreSQL Database initialized with logging tables and NB tables.');
     } catch (err) {
       console.error('❌ Database Init Error:', err);
     } finally {
@@ -257,6 +284,48 @@ const dbHelper = {
       totalDiamonds: parseInt(totalDiamonds.rows[0].sum || 0),
       totalGames: parseInt(totalCX.rows[0].count)
     };
+  },
+
+  // Number Box Methods
+  getActiveNBGame: async (guildId) => {
+    const res = await pool.query(
+      'SELECT * FROM nb_games WHERE guild_id = $1 AND is_active = 1 AND expires_at > $2',
+      [guildId, Date.now()]
+    );
+    return res.rows[0] || null;
+  },
+
+  createNBGame: async (guildId, winningNumber, messageId) => {
+    const expiresAt = Date.now() + (24 * 60 * 60 * 1000);
+    const res = await pool.query(
+      'INSERT INTO nb_games (guild_id, winning_number, expires_at, message_id) VALUES ($1, $2, $3, $4) RETURNING *',
+      [guildId, winningNumber, expiresAt, messageId]
+    );
+    return res.rows[0];
+  },
+
+  updateNBGame: async (gameId, data) => {
+    const keys = Object.keys(data);
+    const values = Object.values(data);
+    const setClause = keys.map((key, i) => `${key.toLowerCase()} = $${i + 2}`).join(', ');
+    await pool.query(`UPDATE nb_games SET ${setClause} WHERE id = $1`, [gameId, ...values]);
+  },
+
+  getNBParticipants: async (gameId) => {
+    const res = await pool.query('SELECT * FROM nb_participants WHERE game_id = $1', [gameId]);
+    return res.rows;
+  },
+
+  checkNBParticipant: async (gameId, userId) => {
+    const res = await pool.query('SELECT * FROM nb_participants WHERE game_id = $1 AND user_id = $2', [gameId, userId]);
+    return res.rows[0] || null;
+  },
+
+  addNBParticipant: async (gameId, userId, username, isWinner) => {
+    await pool.query(
+      'INSERT INTO nb_participants (game_id, user_id, username, is_winner, timestamp) VALUES ($1, $2, $3, $4, $5)',
+      [gameId, userId, username, isWinner ? 1 : 0, Date.now()]
+    );
   }
 };
 
