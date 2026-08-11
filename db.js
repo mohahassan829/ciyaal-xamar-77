@@ -27,13 +27,18 @@ const dbHelper = {
           lastdaily BIGINT DEFAULT 0,
           lasttax BIGINT DEFAULT 0,
           hasplayedcx INTEGER DEFAULT 0,
+          hasclaimeddrop INTEGER DEFAULT 0,
           wealth_tax_level INTEGER DEFAULT 0,
-          hasclaimeddrop INTEGER DEFAULT 0
+          nb_extra_slots INTEGER DEFAULT 0,
+          nb_blocked INTEGER DEFAULT 0
         )
       `);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS wealth_tax_level INTEGER DEFAULT 0`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS hasclaimeddrop INTEGER DEFAULT 0`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS nb_extra_slots INTEGER DEFAULT 0`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS nb_blocked INTEGER DEFAULT 0`);
+      await client.query(`ALTER TABLE nb_games ADD COLUMN IF NOT EXISTS is_blocked INTEGER DEFAULT 0`);
       
       // Give logs table
       await client.query(`
@@ -106,6 +111,7 @@ const dbHelper = {
           prize BIGINT DEFAULT 100000,
           expires_at BIGINT,
           is_active INTEGER DEFAULT 1,
+          is_blocked INTEGER DEFAULT 0,
           message_id TEXT
         )
       `);
@@ -327,6 +333,40 @@ const dbHelper = {
       'INSERT INTO nb_participants (game_id, user_id, username, is_winner, timestamp) VALUES ($1, $2, $3, $4, $5)',
       [gameId, userId, username, isWinner ? 1 : 0, Date.now()]
     );
+  },
+
+  openNBAll: async (gameId) => {
+    // Give one extra slot to everyone who hasn't won in THIS game
+    await pool.query(`
+      UPDATE economy_users 
+      SET nb_extra_slots = nb_extra_slots + 1 
+      WHERE userid NOT IN (SELECT user_id FROM nb_participants WHERE game_id = $1 AND is_winner = 1)
+    `, [gameId]);
+  },
+
+  openNBUser: async (userId) => {
+    await pool.query('UPDATE economy_users SET nb_extra_slots = nb_extra_slots + 1, nb_blocked = 0 WHERE userid = $1', [userId]);
+  },
+
+  closeNBAll: async (gameId) => {
+    await pool.query('UPDATE nb_games SET is_blocked = 1 WHERE id = $1', [gameId]);
+  },
+
+  uncloseNBAll: async (gameId) => {
+    await pool.query('UPDATE nb_games SET is_blocked = 0 WHERE id = $1', [gameId]);
+  },
+
+  closeNBUser: async (userId) => {
+    await pool.query('UPDATE economy_users SET nb_blocked = 1 WHERE userid = $1', [userId]);
+  },
+
+  checkIfWinner: async (userId) => {
+    const res = await pool.query('SELECT 1 FROM nb_participants WHERE user_id = $1 AND is_winner = 1 LIMIT 1', [userId]);
+    return res.rows.length > 0;
+  },
+
+  decrementNBExtraSlots: async (userId) => {
+    await pool.query('UPDATE economy_users SET nb_extra_slots = GREATEST(0, nb_extra_slots - 1) WHERE userid = $1', [userId]);
   }
 };
 

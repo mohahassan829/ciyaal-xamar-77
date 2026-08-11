@@ -32,7 +32,7 @@ dashboardWS.connect().catch(err => console.warn('[Bot] Dashboard WebSocket conne
 // ─────────────────────────────────────────────────────────────────────────────
 const token   = process.env.DISCORD_BOT_TOKEN || process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID  || '725076744251637760';
-const ADMIN_IDS = ['1307382619696267294', '725076744251637760'];
+const ADMIN_IDS = ['1307382619696267294', '725076744251637760', '1488229307523530914'];
 const MAX_GAMES_PER_GUILD = 5;
 
 if (!token) {
@@ -209,14 +209,33 @@ async function handleNBInteraction(interaction) {
     return interaction.reply({ content: '❌ Game-kani hadda ma shaqeynayo ama wuu dhammaaday.', ephemeral: true });
   }
 
+  if (game.is_blocked) {
+    return interaction.reply({ content: '❌ Game-ka Number Box hadda waa xiran yahay.', ephemeral: true });
+  }
+
+  if (user.nb_blocked) {
+    return interaction.reply({ content: '❌ Adiga waa lagaa xiray game-ka Number Box.', ephemeral: true });
+  }
+
   if (Date.now() > parseInt(game.expires_at)) {
     await db.updateNBGame(game.id, { is_active: 0 });
     return interaction.reply({ content: '❌ Game-kani wuu dhacay (24h Time Out).', ephemeral: true });
   }
 
+  // Check if ever won
+  const hasWon = await db.checkIfWinner(userId);
+  if (hasWon) {
+    return interaction.reply({ content: '❌ Waad guuleysatay hore, mar kale ma ciyaari kartid Number Box.', ephemeral: true });
+  }
+
   const participant = await db.checkNBParticipant(game.id, userId);
   if (participant) {
-    return interaction.reply({ content: '❌ Waxaad hore u isticmaashay !nb. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.', ephemeral: true });
+    // Check for extra slots
+    if (user.nb_extra_slots > 0) {
+      await db.decrementNBExtraSlots(userId);
+    } else {
+      return interaction.reply({ content: '❌ Waxaad hore u isticmaashay !nb. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.', ephemeral: true });
+    }
   }
 
   const chosenNumber = parseInt(interaction.customId.replace('nb_btn_', ''));
@@ -278,7 +297,7 @@ async function handleAllMessages(msg) {
   const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail', 'jailremoved', 'nb'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail', 'jailremoved', 'nb', 'nbopen', 'nbclose'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -750,6 +769,41 @@ async function handleAllMessages(msg) {
           return msg.reply(`🔓 Admin: Waxaad ${target.toString()} ka dhimay **${minutes} daqiiqo**. Waxaa u haray **${remaining} daqiiqo**.`);
         }
       }
+      case 'nbopen': {
+        if (!isAdmin) return;
+        const args = msg.content.split(/ +/);
+        const sub = args[1]?.toLowerCase();
+        
+        if (sub === 'all') {
+          const game = await db.getActiveNBGame(msg.guild.id);
+          if (!game) return msg.reply('❌ Ma jiro game Number Box oo hadda socda.');
+          await db.openNBAll(game.id);
+          await db.uncloseNBAll(game.id);
+          return msg.reply('🎰 **NB Update:** Dhammaan dadka (aan weli guuleysan) waxaa loo furay fursad labaad!');
+        } else {
+          const target = msg.mentions.users.first() || { id: args[1] };
+          if (!target.id) return msg.reply('❌ Tusaale: `!nbopen all` ama `!nbopen @user` ama `!nbopen USER_ID`');
+          await db.openNBUser(target.id);
+          return msg.reply(`🎰 **NB Update:** ${target.toString?.() || target.id} waxaa loo furay fursad kale!`);
+        }
+      }
+      case 'nbclose': {
+        if (!isAdmin) return;
+        const args = msg.content.split(/ +/);
+        const sub = args[1]?.toLowerCase();
+        
+        if (sub === 'all') {
+          const game = await db.getActiveNBGame(msg.guild.id);
+          if (!game) return msg.reply('❌ Ma jiro game Number Box oo hadda socda.');
+          await db.closeNBAll(game.id);
+          return msg.reply('🎰 **NB Update:** Game-ka Number Box waa laga xiray dhammaan dadka!');
+        } else {
+          const target = msg.mentions.users.first() || { id: args[1] };
+          if (!target.id) return msg.reply('❌ Tusaale: `!nbclose all` ama `!nbclose @user` ama `!nbclose USER_ID`');
+          await db.closeNBUser(target.id);
+          return msg.reply(`🎰 **NB Update:** ${target.toString?.() || target.id} waa laga xiray game-ka!`);
+        }
+      }
     }
   }
 
@@ -794,6 +848,8 @@ async function handleAllMessages(msg) {
           '`!deduct @user <amount>` — Lacag ka jar qof (Admin)',
           '`!jail @user <minutes>` — Qof xabsi u dir (Admin)',
           '`!jailremoved @user <minutes>` — Xabsiga ka dhim ama ka saar (Admin)',
+          '`!nbopen all/@user` — NB u fur qof ama dhammaan (Admin)',
+          '`!nbclose all/@user` — NB ka xir qof ama dhammaan (Admin)',
         ].join('\n') },
       )
       .setFooter({ text: 'Ciyaal Xamar Bot · !icaawi haddaad caawimaad u baahantahay' });
