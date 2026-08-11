@@ -9,6 +9,7 @@ const pool = new Pool({
 });
 
 const dbHelper = {
+  pool,
   init: async () => {
     const client = await pool.connect();
     try {

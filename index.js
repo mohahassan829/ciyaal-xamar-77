@@ -76,6 +76,14 @@ client.once('clientReady', async c => {
   checkTaxes();
 
   deployCommands(token, c.user.id).catch(err => console.error("⚠️ deployCommands error:", err?.message || err));
+  
+  // One-time reset for Number Box (Update Aug 11, 2026)
+  try {
+    const res = await db.pool.query('UPDATE nb_games SET is_active = 0 WHERE is_active = 1');
+    if (res.rowCount > 0) console.log(`🔄 [NB Reset] Deactivated ${res.rowCount} old games for the update.`);
+  } catch (err) {
+    console.error('⚠️ [NB Reset] Error:', err.message);
+  }
 });
 
 async function checkTaxes() {
