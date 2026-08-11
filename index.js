@@ -232,10 +232,15 @@ async function handleNBInteraction(interaction) {
   if (participant) {
     // Check for extra slots
     if (user.nb_extra_slots > 0) {
+      // Allow the try and decrement the slot
       await db.decrementNBExtraSlots(userId);
     } else {
       return interaction.reply({ content: '❌ Waxaad hore u isticmaashay !nb. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.', ephemeral: true });
     }
+  } else {
+    // If it's their first time, we don't need to check nb_extra_slots, 
+    // but we should still allow it. 
+    // If an admin opened it for everyone, even new people can play.
   }
 
   const chosenNumber = parseInt(interaction.customId.replace('nb_btn_', ''));

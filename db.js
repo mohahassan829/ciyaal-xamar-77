@@ -164,7 +164,9 @@ const dbHelper = {
       lastDaily: parseInt(user.lastdaily || 0),
       lastTax: parseInt(user.lasttax || 0),
       hasPlayedCX: user.hasplayedcx,
-      hasClaimedDrop: user.hasclaimeddrop
+      hasClaimedDrop: user.hasclaimeddrop,
+      nb_extra_slots: parseInt(user.nb_extra_slots || 0),
+      nb_blocked: parseInt(user.nb_blocked || 0)
     };
   },
 
