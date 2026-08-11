@@ -161,7 +161,7 @@ function buildNBEmbed(currentWinners, maxWinners, expiresAt, winnersList) {
       { name: '⏳ Time Left', value: `\`${hours}h ${minutes}m\``, inline: true },
       { name: '🏆 Winners List', value: winnersText }
     )
-    .setDescription('**Dooro hal number (1–20) si aad u guuleysato!**\n\n⚠️ Kaliya hal mar ayaad riixi kartaa.')
+    .setDescription('**Dooro hal number (1–10) si aad u guuleysato!**\n\n⚠️ Kaliya hal mar ayaad riixi kartaa.')
     .setFooter({ text: 'Number Box • Guushu waa nasiib' })
     .setTimestamp();
 
@@ -170,7 +170,7 @@ function buildNBEmbed(currentWinners, maxWinners, expiresAt, winnersList) {
 
 function buildNBButtons(disabled = false) {
   const rows = [];
-  for (let i = 0; i < 4; i++) {
+  for (let i = 0; i < 2; i++) {
     const row = new ActionRowBuilder();
     for (let j = 1; j <= 5; j++) {
       const num = (i * 5) + j;
@@ -229,7 +229,7 @@ async function handleNBInteraction(interaction) {
 
     let nextWinningNumber = game.winning_number;
     while (nextWinningNumber === game.winning_number) {
-      nextWinningNumber = Math.floor(Math.random() * 20) + 1;
+      nextWinningNumber = Math.floor(Math.random() * 10) + 1;
     }
 
     const updates = {
@@ -310,7 +310,7 @@ async function handleAllMessages(msg) {
         let game = await db.getActiveNBGame(msg.guild.id);
         
         if (!game) {
-          const winningNumber = Math.floor(Math.random() * 20) + 1;
+          const winningNumber = Math.floor(Math.random() * 10) + 1;
           const initialEmbed = buildNBEmbed(0, 5, Date.now() + (24 * 60 * 60 * 1000), []);
           const rows = buildNBButtons(false);
           const reply = await msg.reply({ embeds: [initialEmbed], components: rows });
