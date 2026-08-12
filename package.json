@@ -13,9 +13,7 @@
     "discord.js": "^14.16.3",
     "dotenv": "^16.4.5",
     "pg": "^8.13.3",
-    "socket.io-client": "^4.8.3",
-    "sqlite": "^5.1.1",
-    "sqlite3": "^5.1.7"
+    "socket.io-client": "^4.8.3"
   },
   "engines": {
     "node": ">=18.0.0"
