@@ -64,23 +64,20 @@ function calculateWealthTax(totalWealth, currentTaxLevel) {
 }
 
 // High roller risk: 70% loss, 30% win for 1M+ players
-// Event: 90% loss for 48 hours (Ends Aug 10, 2026)
 function applyHighRollerRisk(amount, totalWealth) {
   if (totalWealth >= 1000000) {
-    const EVENT_END = 1786386940000;
-    const lossThreshold = Date.now() < EVENT_END ? 0.9 : 0.7;
     const rand = Math.random();
-    if (rand < lossThreshold) {
-      // Loss case
+    if (rand < 0.7) {
+      // 70% chance to lose
       return {
         win: false,
-        multiplier: 0, // Lose the amount
+        multiplier: 0,
       };
     } else {
       // 30% chance to win
       return {
         win: true,
-        multiplier: 2, // Win 2x
+        multiplier: 2,
       };
     }
   }

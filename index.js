@@ -77,13 +77,7 @@ client.once('clientReady', async c => {
 
   deployCommands(token, c.user.id).catch(err => console.error("⚠️ deployCommands error:", err?.message || err));
   
-  // One-time reset for Number Box (Update Aug 11, 2026)
-  try {
-    const res = await db.pool.query('UPDATE nb_games SET is_active = 0 WHERE is_active = 1');
-    if (res.rowCount > 0) console.log(`🔄 [NB Reset] Deactivated ${res.rowCount} old games for the update.`);
-  } catch (err) {
-    console.error('⚠️ [NB Reset] Error:', err.message);
-  }
+
 });
 
 async function checkTaxes() {
@@ -150,143 +144,7 @@ async function loginWithRetry() {
   loginWithRetry();
 })();
 
-// ── Number Box Helpers ───────────────────────────────────────────────────────
-function buildNBEmbed(currentWinners, maxWinners, expiresAt, winnersList) {
-  const timeLeft = Math.max(0, expiresAt - Date.now());
-  const hours = Math.floor(timeLeft / (60 * 60 * 1000));
-  const minutes = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
-  
-  let winnersText = winnersList.length > 0 
-    ? `🟢 ${winnersList.length} Winners Found:\n${winnersList.map(w => `• <@${w.user_id}>`).join('\n')}`
-    : '⚪ No winners yet.';
 
-  const embed = new EmbedBuilder()
-    .setTitle('🎰 NUMBER BOX')
-    .setColor(0xffd700)
-    .addFields(
-      { name: '💰 Prize', value: '`$100,000 Cash`', inline: true },
-      { name: '🎯 Winners', value: `\`${currentWinners}/${maxWinners}\``, inline: true },
-      { name: '⏳ Time Left', value: `\`${hours}h ${minutes}m\``, inline: true },
-      { name: '🏆 Winners List', value: winnersText }
-    )
-    .setDescription('**Dooro hal number (1–10) si aad u guuleysato!**\n\n⚠️ Kaliya hal mar ayaad riixi kartaa.')
-    .setFooter({ text: 'Number Box • Guushu waa nasiib' })
-    .setTimestamp();
-
-  return embed;
-}
-
-function buildNBButtons(disabled = false) {
-  const rows = [];
-  for (let i = 0; i < 2; i++) {
-    const row = new ActionRowBuilder();
-    for (let j = 1; j <= 5; j++) {
-      const num = (i * 5) + j;
-      row.addComponents(
-        new ButtonBuilder()
-          .setCustomId(`nb_btn_${num}`)
-          .setLabel(`${num}`)
-          .setStyle(ButtonStyle.Secondary)
-          .setDisabled(disabled)
-      );
-    }
-    rows.push(row);
-  }
-  return rows;
-}
-
-async function handleNBInteraction(interaction) {
-  const userId = interaction.user.id;
-  const guildId = interaction.guild.id;
-  
-  const user = await db.getUser(userId, interaction.user.username);
-  if (!user.hasPlayedCX) {
-    return interaction.reply({ content: '❌failed', ephemeral: true });
-  }
-
-  const game = await db.getActiveNBGame(guildId);
-  if (!game) {
-    return interaction.reply({ content: '❌ Game-kani hadda ma shaqeynayo ama wuu dhammaaday.', ephemeral: true });
-  }
-
-  if (game.is_blocked) {
-    return interaction.reply({ content: '❌ Game-ka Number Box hadda waa xiran yahay.', ephemeral: true });
-  }
-
-  if (user.nb_blocked) {
-    return interaction.reply({ content: '❌ Adiga waa lagaa xiray game-ka Number Box.', ephemeral: true });
-  }
-
-  if (Date.now() > parseInt(game.expires_at)) {
-    await db.updateNBGame(game.id, { is_active: 0 });
-    return interaction.reply({ content: '❌ Game-kani wuu dhacay (24h Time Out).', ephemeral: true });
-  }
-
-  // Check if ever won
-  const hasWon = await db.checkIfWinner(userId);
-  if (hasWon) {
-    return interaction.reply({ content: '❌ Waad guuleysatay hore, mar kale ma ciyaari kartid Number Box.', ephemeral: true });
-  }
-
-  const participant = await db.checkNBParticipant(game.id, userId);
-  if (participant) {
-    // Check for extra slots
-    if (user.nb_extra_slots > 0) {
-      // Allow the try and decrement the slot
-      await db.decrementNBExtraSlots(userId);
-    } else {
-      return interaction.reply({ content: '❌ Waxaad hore u isticmaashay !nb. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.', ephemeral: true });
-    }
-  } else {
-    // If it's their first time, we don't need to check nb_extra_slots, 
-    // but we should still allow it. 
-    // If an admin opened it for everyone, even new people can play.
-  }
-
-  const chosenNumber = parseInt(interaction.customId.replace('nb_btn_', ''));
-  const isWinner = chosenNumber === game.winning_number;
-
-  if (isWinner) {
-    const newWinnersCount = game.winners_count + 1;
-    await db.addNBParticipant(game.id, userId, interaction.user.username, true);
-    await db.addWallet(userId, 100000);
-    await db.logActivity({
-      userId,
-      username: interaction.user.username,
-      type: 'nb_win',
-      description: `Won Number Box (Number: ${chosenNumber})`,
-      amount: 100000,
-      serverId: guildId
-    });
-
-    let nextWinningNumber = game.winning_number;
-    while (nextWinningNumber === game.winning_number) {
-      nextWinningNumber = Math.floor(Math.random() * 10) + 1;
-    }
-
-    const updates = {
-      winners_count: newWinnersCount,
-      winning_number: nextWinningNumber
-    };
-
-    if (newWinnersCount >= game.max_winners) {
-      updates.is_active = 0;
-    }
-
-    await db.updateNBGame(game.id, updates);
-
-    const winnersList = await db.getNBParticipants(game.id);
-    const filteredWinners = winnersList.filter(p => p.is_winner === 1);
-    const embed = buildNBEmbed(newWinnersCount, game.max_winners, parseInt(game.expires_at), filteredWinners);
-    const rows = buildNBButtons(newWinnersCount >= game.max_winners);
-
-    await interaction.update({ embeds: [embed], components: rows });
-    await interaction.followUp({ content: `🎉 **WINNER!**\n🔢 Number: ${chosenNumber}\n💰 **+100,000 Cash**\n🏆 Winners: ${newWinnersCount}/${game.max_winners}`, ephemeral: false });
-  } else {
-    await db.addNBParticipant(game.id, userId, interaction.user.username, false);
-    await interaction.reply({ content: '❌ **Nasiib darro!**\nNumber-ka aad dooratay ma ahayn number-ka guuleystay.\nQofkaas mar kale !nb ma isticmaali karo.', ephemeral: true });
-  }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // COMBINED MESSAGE HANDLER
@@ -302,7 +160,7 @@ async function handleAllMessages(msg) {
   const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'drop', 'jail', 'jailremoved', 'nb', 'nbopen', 'nbclose'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'jail', 'jailremoved'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -313,49 +171,7 @@ async function handleAllMessages(msg) {
     }
 
     switch (cmd) {
-      case 'drop': {
-        if (!user.hasPlayedCX) {
-          return msg.reply('❌failed');
-        }
-        if (user.hasClaimedDrop) {
-          return msg.reply('❌ Waxaad hore u isticmaashay !drop. Abaalmarintan hal mar oo keliya ayaa la qaadan karaa.');
-        }
-        
-        await db.addWallet(msg.author.id, 10000);
-        await db.updateUser(msg.author.id, { hasclaimeddrop: 1 });
-        await db.logActivity({
-          userId: msg.author.id,
-          username: msg.author.username,
-          type: 'drop_claim',
-          description: 'Claimed !drop reward',
-          amount: 10000,
-          serverId: msg.guild.id
-        });
-        
-        return msg.reply('🎉 Hambalyo!\nWaxaad heshay 10,000 Cash adigoo isticmaalay !drop.');
-      }
-      case 'nb': {
-        if (!user.hasPlayedCX) {
-          return msg.reply('❌failed');
-        }
-        
-        let game = await db.getActiveNBGame(msg.guild.id);
-        
-        if (!game) {
-          const winningNumber = Math.floor(Math.random() * 10) + 1;
-          const initialEmbed = buildNBEmbed(0, 5, Date.now() + (24 * 60 * 60 * 1000), []);
-          const rows = buildNBButtons(false);
-          const reply = await msg.reply({ embeds: [initialEmbed], components: rows });
-          game = await db.createNBGame(msg.guild.id, winningNumber, reply.id);
-          return;
-        }
 
-        const participants = await db.getNBParticipants(game.id);
-        const winners = participants.filter(p => p.is_winner === 1);
-        const embed = buildNBEmbed(game.winners_count, game.max_winners, parseInt(game.expires_at), winners);
-        const rows = buildNBButtons(game.winners_count >= game.max_winners || Date.now() > parseInt(game.expires_at));
-        return msg.reply({ embeds: [embed], components: rows });
-      }
       case 'wallet': {
         const shieldStatus = user.shieldUntil > Date.now() ? '🛡️ **Active**' : '🔓 **Inactive**';
         const walletEmbed = new EmbedBuilder()
@@ -448,15 +264,7 @@ async function handleAllMessages(msg) {
         }
         economyCooldowns.set(`${msg.author.id}_cx`, Date.now());
         
-        // Event: 90% Loss Rate for 48 Hours (Ends Aug 10, 2026)
-        const EVENT_END = 1786386940000;
-        let result;
-        if (Date.now() < EVENT_END) {
-          const winChance = Math.random() < 0.1; // 10% win = 90% loss
-          result = winChance ? choice : (choice === 'm' ? 'x' : 'm');
-        } else {
-          result = Math.random() < 0.5 ? 'm' : 'x';
-        }
+        const result = Math.random() < 0.5 ? 'm' : 'x';
 
         const resultName = result === 'm' ? 'Madax (M)' : 'Xarash (X)';
         const choiceName = choice === 'm' ? 'Madax (M)' : 'Xarash (X)';
@@ -774,41 +582,7 @@ async function handleAllMessages(msg) {
           return msg.reply(`🔓 Admin: Waxaad ${target.toString()} ka dhimay **${minutes} daqiiqo**. Waxaa u haray **${remaining} daqiiqo**.`);
         }
       }
-      case 'nbopen': {
-        if (!isAdmin) return;
-        const args = msg.content.split(/ +/);
-        const sub = args[1]?.toLowerCase();
-        
-        if (sub === 'all') {
-          const game = await db.getActiveNBGame(msg.guild.id);
-          if (!game) return msg.reply('❌ Ma jiro game Number Box oo hadda socda.');
-          await db.openNBAll(game.id);
-          await db.uncloseNBAll(game.id);
-          return msg.reply('🎰 **NB Update:** Dhammaan dadka (aan weli guuleysan) waxaa loo furay fursad labaad!');
-        } else {
-          const target = msg.mentions.users.first() || { id: args[1] };
-          if (!target.id) return msg.reply('❌ Tusaale: `!nbopen all` ama `!nbopen @user` ama `!nbopen USER_ID`');
-          await db.openNBUser(target.id);
-          return msg.reply(`🎰 **NB Update:** ${target.toString?.() || target.id} waxaa loo furay fursad kale!`);
-        }
-      }
-      case 'nbclose': {
-        if (!isAdmin) return;
-        const args = msg.content.split(/ +/);
-        const sub = args[1]?.toLowerCase();
-        
-        if (sub === 'all') {
-          const game = await db.getActiveNBGame(msg.guild.id);
-          if (!game) return msg.reply('❌ Ma jiro game Number Box oo hadda socda.');
-          await db.closeNBAll(game.id);
-          return msg.reply('🎰 **NB Update:** Game-ka Number Box waa laga xiray dhammaan dadka!');
-        } else {
-          const target = msg.mentions.users.first() || { id: args[1] };
-          if (!target.id) return msg.reply('❌ Tusaale: `!nbclose all` ama `!nbclose @user` ama `!nbclose USER_ID`');
-          await db.closeNBUser(target.id);
-          return msg.reply(`🎰 **NB Update:** ${target.toString?.() || target.id} waa laga xiray game-ka!`);
-        }
-      }
+
     }
   }
 
@@ -842,8 +616,6 @@ async function handleAllMessages(msg) {
           '`!bank` — `!dep <amount>` ama `!with <amount>`',
           '`!shop` — Shield ama Cash iibso',
           '`!rank` — Top 10 Richest Players',
-          '`!drop` — Reward system ($10,000)',
-          '`!nb` — Number Box game ($100,000)',
         ].join('\n') },
         { name: '📊 Admin/Owner Commands', value: [
           '`!dashboard` — Serverrada bot ku jira oo dhan arag (Owner kaliya)',
@@ -853,8 +625,6 @@ async function handleAllMessages(msg) {
           '`!deduct @user <amount>` — Lacag ka jar qof (Admin)',
           '`!jail @user <minutes>` — Qof xabsi u dir (Admin)',
           '`!jailremoved @user <minutes>` — Xabsiga ka dhim ama ka saar (Admin)',
-          '`!nbopen all/@user` — NB u fur qof ama dhammaan (Admin)',
-          '`!nbclose all/@user` — NB ka xir qof ama dhammaan (Admin)',
         ].join('\n') },
       )
       .setFooter({ text: 'Ciyaal Xamar Bot · !icaawi haddaad caawimaad u baahantahay' });
@@ -1088,10 +858,6 @@ async function handleAllInteractions(interaction) {
 
   // ── Ticket buttons ─────────────────────────────────────────────────────────
   if (interaction.isButton()) {
-    if (interaction.customId.startsWith('nb_btn_')) {
-      await handleNBInteraction(interaction);
-      return;
-    }
     switch (interaction.customId) {
       case 'ticket_open':          await handleOpenTicket(interaction);   return;
       case 'ticket_claim':         await handleClaimTicket(interaction);  return;
@@ -1109,7 +875,7 @@ async function handleAllInteractions(interaction) {
   if (interaction.customId.startsWith('open_say_')) {
     const hasPerm = interaction.member?.permissions?.has(PermissionFlagsBits.Administrator)
       || interaction.member?.permissions?.has(PermissionFlagsBits.ManageMessages);
-    if (!hasPerm) { await interaction.reply({ content: '🔐 Ogolaanshahaaga kuma filan si aad u isticmaasho `!say`.', ephemeral: true }); return; }
+    if (!hasPerm) { await interaction.reply({ content: '🔐 Ogolaanshahaaga kuma filan si aad u isticmaasho `!say`.', flags: 64 }); return; }
     const targetChannelId = interaction.customId.slice('open_say_'.length);
     const modal = new ModalBuilder().setCustomId(`say_modal_${targetChannelId}`).setTitle('📝 Say — Fariin Bot-ku Diro');
     const contentInput = new TextInputBuilder().setCustomId('say_content').setLabel('Content (waajib)').setStyle(TextInputStyle.Paragraph).setRequired(true).setMaxLength(2000);
