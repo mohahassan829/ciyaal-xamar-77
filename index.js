@@ -966,8 +966,8 @@ async function handleAllInteractions(interaction) {
       result = await db.payLoan(ownerId, requestedAmount);
       try { await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid, serverId: interaction.guildId }); } catch (err) { console.error('Loan payment log error:', err?.stack || err); }
     } catch (err) {
-      console.error('Loan payment selection error:', err?.stack || err);
-      await interaction.editReply({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', embeds: [], components: [] });
+      console.error('Loan payment selection error:', { message: err?.message, code: err?.code, detail: err?.detail, stack: err?.stack });
+      await interaction.editReply({ content: `❌ Celi Deynta waa fashilantay (${err?.code || 'DB_ERROR'}). Fadlan mar kale isku day.`, embeds: [], components: [] });
       return;
     }
     const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);

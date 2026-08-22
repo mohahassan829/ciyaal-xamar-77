@@ -263,6 +263,7 @@ const dbHelper = {
       const loan = loanRes.rows[0];
       if (!loan) { await client.query('ROLLBACK'); return { paid: 0, remaining: 0, cleared: true }; }
       const requested = Math.max(0, Number(amount) || 0);
+      await client.query(`INSERT INTO economy_users (userid, username) VALUES ($1, $1) ON CONFLICT (userid) DO NOTHING`, [userId]);
       const userRes = await client.query(`SELECT wallet, bank FROM economy_users WHERE userid = $1`, [userId]);
       const balance = userRes.rows[0] || { wallet: 0, bank: 0 };
       const currentWallet = Math.max(0, Number(balance.wallet) || 0);
