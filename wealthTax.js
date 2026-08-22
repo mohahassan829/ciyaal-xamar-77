@@ -2,16 +2,16 @@
 // One-time tax when player reaches wealth thresholds
 
 const TAX_TIERS = [
-  { threshold: 100000, tax: 5000 },
-  { threshold: 200000, tax: 7000 },
-  { threshold: 300000, tax: 10000 },
-  { threshold: 400000, tax: 12000 },
-  { threshold: 500000, tax: 18000 },
-  { threshold: 600000, tax: 25000 },
-  { threshold: 700000, tax: 32000 },
-  { threshold: 800000, tax: 40000 },
-  { threshold: 900000, tax: 50000 },
-  { threshold: 1000000, tax: 60000 },
+  { threshold: 100000, tax: 2500 },
+  { threshold: 200000, tax: 5000 },
+  { threshold: 300000, tax: 7500 },
+  { threshold: 400000, tax: 10000 },
+  { threshold: 500000, tax: 15000 },
+  { threshold: 600000, tax: 20000 },
+  { threshold: 700000, tax: 25000 },
+  { threshold: 800000, tax: 30000 },
+  { threshold: 900000, tax: 35000 },
+  { threshold: 1000000, tax: 40000 },
 ];
 
 // Generate tax tiers up to any amount

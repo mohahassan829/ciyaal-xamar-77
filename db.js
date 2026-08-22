@@ -26,10 +26,23 @@ const dbHelper = {
           lastwork BIGINT DEFAULT 0,
           lastdaily BIGINT DEFAULT 0,
           lasttax BIGINT DEFAULT 0,
-          hasplayedcx INTEGER DEFAULT 0
+          hasplayedcx INTEGER DEFAULT 0,
+          xp BIGINT DEFAULT 0,
+          level INTEGER DEFAULT 1,
+          existing_bonus_claimed INTEGER DEFAULT 0
         )
       `);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS xp BIGINT DEFAULT 0`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS existing_bonus_claimed INTEGER DEFAULT 0`);
+      await client.query(`CREATE TABLE IF NOT EXISTS economy_migrations (name TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)`);
+      const bonusMigration = await client.query(`SELECT 1 FROM economy_migrations WHERE name = 'economy_2_existing_bonus'`);
+      if (bonusMigration.rowCount === 0) {
+        await client.query(`UPDATE economy_users SET bank = bank + 2000, existing_bonus_claimed = 1 WHERE hasplayedcx = 1 AND existing_bonus_claimed = 0`);
+        await client.query(`UPDATE economy_users SET bank = bank + 1000, existing_bonus_claimed = 1 WHERE hasplayedcx = 0 AND existing_bonus_claimed = 0`);
+        await client.query(`INSERT INTO economy_migrations (name, applied_at) VALUES ('economy_2_existing_bonus', $1)`, [Date.now()]);
+      }
       
       // Give logs table
       await client.query(`
@@ -106,7 +119,7 @@ const dbHelper = {
     if (!user) {
       await pool.query(
         'INSERT INTO economy_users (userid, username, lasttax, bank) VALUES ($1, $2, $3, $4)', 
-        [userId, username, Date.now(), 500]
+        [userId, username, Date.now(), 1000]
       );
       const newRes = await pool.query('SELECT * FROM economy_users WHERE userid = $1', [userId]);
       user = newRes.rows[0];
@@ -126,7 +139,10 @@ const dbHelper = {
       lastWork: parseInt(user.lastwork || 0),
       lastDaily: parseInt(user.lastdaily || 0),
       lastTax: parseInt(user.lasttax || 0),
-      hasPlayedCX: user.hasplayedcx
+      hasPlayedCX: user.hasplayedcx,
+      xp: parseInt(user.xp || 0),
+      level: parseInt(user.level || 1),
+      existingBonusClaimed: user.existing_bonus_claimed
     };
   },
 
@@ -155,6 +171,19 @@ const dbHelper = {
   removeBank: async (userId, amount) => {
     const user = await dbHelper.getUser(userId);
     await dbHelper.updateUser(userId, { bank: Math.max(0, user.bank - amount) });
+  },
+
+  addXP: async (userId, amount) => {
+    const user = await dbHelper.getUser(userId);
+    const xp = user.xp + Math.max(0, Number(amount) || 0);
+    const level = Math.max(1, Math.floor(Math.sqrt(xp / 10)) + 1);
+    await dbHelper.updateUser(userId, { xp, level });
+    return { xp, level };
+  },
+
+  getXPLeaderboard: async (limit = 10) => {
+    const res = await pool.query('SELECT userid, username, xp, level FROM economy_users ORDER BY xp DESC LIMIT $1', [limit]);
+    return res.rows.map(row => ({ userId: row.userid, username: row.username, xp: parseInt(row.xp || 0), level: parseInt(row.level || 1) }));
   },
 
   addDiamonds: async (userId, amount) => {
@@ -212,6 +241,8 @@ const dbHelper = {
       wallet: parseInt(user.wallet || 0),
       bank: parseInt(user.bank || 0),
       hasPlayedCX: user.hasplayedcx,
+      xp: parseInt(user.xp || 0),
+      level: parseInt(user.level || 1),
       lastTax: parseInt(user.lasttax || 0)
     }));
   },

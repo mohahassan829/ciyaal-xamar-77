@@ -160,7 +160,7 @@ async function handleAllMessages(msg) {
   const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'jailbuy', 'dep', 'with', 'give', 'rank', 'grant', 'deduct', 'jail', 'jailremoved'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'buydiamond', 'jailbuy', 'dep', 'with', 'give', 'rank', 'xp', 'xprank', 'grant', 'deduct', 'jail', 'jailremoved'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -192,7 +192,8 @@ async function handleAllMessages(msg) {
         if (Date.now() - user.lastWork < cooldown) {
           return msg.reply(`⏳ Fadlan sug **${econUtils.formatTime(cooldown - (Date.now() - user.lastWork))}** si aad mar kale u shaqeyso.`);
         }
-        await db.addWallet(msg.author.id, 200);
+        await db.addWallet(msg.author.id, 500);
+        await db.addXP(msg.author.id, 15);
         await db.updateUser(msg.author.id, { lastWork: Date.now() });
         await db.logActivity({
           userId: msg.author.id,
@@ -257,7 +258,7 @@ async function handleAllMessages(msg) {
         const choice = args[2]?.toLowerCase();
         if (!amount || amount > user.wallet) return msg.reply('❌ Lacagta aad dhigtay ma saxna ama wallet-kaaga kuma filna.');
         if (!['m', 'x'].includes(choice)) return msg.reply('❌ Fadlan dooro **m** (Madax) ama **x** (Xarash). Tusaale: `!cx 100 m`');
-        const cxCooldown = 30000;
+        const cxCooldown = 10000;
         const lastCX = economyCooldowns.get(`${msg.author.id}_cx`) || 0;
         if (Date.now() - lastCX < cxCooldown) {
           return msg.reply(`⏳ Fadlan sug **${Math.ceil((cxCooldown - (Date.now() - lastCX)) / 1000)}s** si aad mar kale u ciyaarto.`);
@@ -294,6 +295,8 @@ async function handleAllMessages(msg) {
           win
         );
         if (win) {
+          const xpReward = amount >= 20000 ? 100 : amount >= 10000 ? 50 : amount >= 5000 ? 30 : 15;
+          await db.addXP(msg.author.id, xpReward);
           await db.addWallet(msg.author.id, amount);
           const updatedUser = await db.getUser(msg.author.id, msg.author.username);
           const totalWealth = parseInt(updatedUser.wallet || 0) + parseInt(updatedUser.bank || 0);
@@ -309,11 +312,37 @@ async function handleAllMessages(msg) {
             try { await msg.author.send({ embeds: [econUtils.createEmbed('🏛️ Government Wealth Tax', `Waxaad gaartay heerka $${taxInfo.tier.toLocaleString()}+\n\nCanshuurta: $${taxInfo.taxAmount.toLocaleString()} Cash\nLacagta hadda kuu hartay: $${(totalWealth - taxInfo.taxAmount).toLocaleString()} Cash`)] }); } catch(e) {}
           }
           
-          return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**${taxMessage}`, econUtils.config.colors.success)] });
+          return msg.reply({ embeds: [econUtils.createEmbed('🎉 Waad Guuleysatay!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💰 Waxaad heshay: **$${amount * 2} Cash**\n⭐ XP Earned: **${xpReward} XP**${taxMessage}`, econUtils.config.colors.success)] });
         } else {
           await db.removeWallet(msg.author.id, amount);
           return msg.reply({ embeds: [econUtils.createEmbed('😔 Nasiib darro!', `🪙 Doorashadaada: ${choiceName}\n🎲 Natiijada: ${resultName}\n💸 Waxaad khasaarisay: **$${amount} Cash**\n\n🍀 Isku day mar kale`, econUtils.config.colors.error)] });
         }
+      }
+      case 'xp': {
+        const previousThreshold = Math.pow(Math.max(0, user.level - 1), 2) * 10;
+        const nextXP = Math.pow(user.level, 2) * 10;
+        const progress = Math.min(10, Math.max(0, Math.floor(((user.xp - previousThreshold) / Math.max(1, nextXP - previousThreshold)) * 10)));
+        const bar = '█'.repeat(progress) + '░'.repeat(10 - progress);
+        const xpEmbed = econUtils.createEmbed('⭐ XP PROFILE', `👤 Player: ${msg.author}
+⭐ XP: **${user.xp.toLocaleString()}**
+🏆 Level: **${user.level}**
+📈 Next Level: **${nextXP.toLocaleString()} XP**
+
+[${bar}]`, econUtils.config.colors.economy);
+        return msg.reply({ embeds: [xpEmbed] });
+      }
+      case 'buydiamond': {
+        const args = msg.content.split(/ +/);
+        const amount = parseInt(args[1] || '');
+        const costs = { 1: 30, 5: 60, 10: 100, 25: 200, 50: 300 };
+        const cost = costs[amount];
+        if (!cost) return msg.reply('❌ Isticmaal: `!buydiamond 1`, `5`, `10`, `25`, ama `50`.');
+        if (user.xp < cost) return msg.reply(`❌ XP kugu filan ma haysatid. Waxaad u baahan tahay **${cost} XP**.`);
+        await db.updateUser(msg.author.id, { xp: user.xp - cost });
+        await db.addDiamonds(msg.author.id, amount);
+        return msg.reply({ embeds: [econUtils.createEmbed('💎 DIAMOND PURCHASE', `Waxaad iibsatay **${amount} 💎**
+⭐ XP Used: **${cost} XP**
+⭐ Remaining XP: **${(user.xp - cost).toLocaleString()} XP**`, econUtils.config.colors.success)] });
       }
       case 'rob': {
         const target = msg.mentions.users.first();
@@ -487,6 +516,11 @@ async function handleAllMessages(msg) {
         });
         return msg.reply(`💸 Waxaad u dirtay **$${amount.toLocaleString()}** ${target.toString()}.`);
       }
+      case 'xprank': {
+        const top = await db.getXPLeaderboard(10);
+        const desc = top.map((t, i) => `**${i + 1}.** <@${t.userId}> — **${t.xp.toLocaleString()} XP** (Level ${t.level})`).join('\n');
+        return msg.reply({ embeds: [econUtils.createEmbed('⭐ XP LEADERBOARD', desc || 'Ma jiro qof weli liiska ku jira.', econUtils.config.colors.economy)] });
+      }
       case 'rank': {
         const top = await db.getTopRich(10);
         let desc = top.map((t, i) => `**${i + 1}.** <@${t.userId}> — **$${t.total.toLocaleString()}**`).join('\n');
@@ -610,12 +644,15 @@ async function handleAllMessages(msg) {
         { name: '💰 Economy System', value: [
           '`!wallet` — Wallet, Bank iyo Diamonds arag',
           '`!cx <amount> <m/x>` — Lacag ku khamaar (Madax/Xarash)',
-          '`!work` — Shaqayso 2 saacadood kasta ($200)',
+          '`!work` — Shaqayso 2 saacadood kasta ($500 + 15 XP)',
+          '`!xp` — XP iyo Level profile-kaaga arag',
+          '`!buydiamond <amount>` — XP ku beddel Diamonds (1/5/10/25/50)',
           '`!daily` — Hadiyad maalinle ah qaado',
           '`!rob @user` — Qof kale lacag ka xado',
           '`!bank` — `!dep <amount>` ama `!with <amount>`',
           '`!shop` — Shield ama Cash iibso',
           '`!rank` — Top 10 Richest Players',
+          '`!xprank` — Top 10 XP Players',
         ].join('\n') },
         { name: '📊 Admin/Owner Commands', value: [
           '`!dashboard` — Serverrada bot ku jira oo dhan arag (Owner kaliya)',
