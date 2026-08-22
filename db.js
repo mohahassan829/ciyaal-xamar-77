@@ -61,6 +61,23 @@ const dbHelper = {
         await client.query(`INSERT INTO economy_migrations (name, applied_at) VALUES ('economy_2_existing_bonus', $1)`, [Date.now()]);
       }
       
+      // Loan system table
+      await client.query(`
+        CREATE TABLE IF NOT EXISTS economy_loans (
+          id SERIAL PRIMARY KEY,
+          userid TEXT NOT NULL,
+          username TEXT,
+          principal BIGINT NOT NULL,
+          remaining BIGINT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          borrowed_at BIGINT NOT NULL,
+          due_at BIGINT NOT NULL,
+          overdue_at BIGINT,
+          paid_at BIGINT
+        )
+      `);
+      await client.query(`CREATE INDEX IF NOT EXISTS economy_loans_user_status_idx ON economy_loans(userid, status)`);
+
       // Give logs table
       await client.query(`
         CREATE TABLE IF NOT EXISTS give_logs (
@@ -171,8 +188,14 @@ const dbHelper = {
   },
 
   addWallet: async (userId, amount) => {
-    const user = await dbHelper.getUser(userId);
-    await dbHelper.updateUser(userId, { wallet: user.wallet + amount });
+    const value = Math.max(0, Number(amount) || 0);
+    const collected = await dbHelper.collectLoanPayment(userId, value);
+    const remainder = value - (collected?.paid || 0);
+    if (remainder > 0) {
+      const user = await dbHelper.getUser(userId);
+      await dbHelper.updateUser(userId, { wallet: user.wallet + remainder });
+    }
+    return { collected: collected?.paid || 0, credited: remainder };
   },
 
   removeWallet: async (userId, amount) => {
@@ -181,8 +204,14 @@ const dbHelper = {
   },
 
   addBank: async (userId, amount) => {
-    const user = await dbHelper.getUser(userId);
-    await dbHelper.updateUser(userId, { bank: user.bank + amount });
+    const value = Math.max(0, Number(amount) || 0);
+    const collected = await dbHelper.collectLoanPayment(userId, value);
+    const remainder = value - (collected?.paid || 0);
+    if (remainder > 0) {
+      const user = await dbHelper.getUser(userId);
+      await dbHelper.updateUser(userId, { bank: user.bank + remainder });
+    }
+    return { collected: collected?.paid || 0, credited: remainder };
   },
 
   removeBank: async (userId, amount) => {
@@ -211,6 +240,60 @@ const dbHelper = {
   removeDiamonds: async (userId, amount) => {
     const user = await dbHelper.getUser(userId);
     await dbHelper.updateUser(userId, { diamonds: Math.max(0, user.diamonds - amount) });
+  },
+
+  getActiveLoan: async (userId) => {
+    const res = await pool.query(`SELECT * FROM economy_loans WHERE userid = $1 AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1`, [userId]);
+    const loan = res.rows[0];
+    return loan ? { id: loan.id, userId: loan.userid, username: loan.username, principal: Number(loan.principal), remaining: Number(loan.remaining), status: loan.status, borrowedAt: Number(loan.borrowed_at), dueAt: Number(loan.due_at), overdueAt: loan.overdue_at ? Number(loan.overdue_at) : null } : null;
+  },
+
+  createLoan: async ({ userId, username, amount }) => {
+    const dueAt = Date.now() + 24 * 60 * 60 * 1000;
+    const res = await pool.query(`INSERT INTO economy_loans (userid, username, principal, remaining, status, borrowed_at, due_at) VALUES ($1, $2, $3, $3, 'active', $4, $5) RETURNING *`, [userId, username, amount, Date.now(), dueAt]);
+    const loan = res.rows[0];
+    return { id: loan.id, principal: Number(loan.principal), remaining: Number(loan.remaining), dueAt: Number(loan.due_at) };
+  },
+
+  payLoan: async (userId, amount) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const loanRes = await client.query(`SELECT * FROM economy_loans WHERE userid = $1 AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1 FOR UPDATE`, [userId]);
+      const loan = loanRes.rows[0];
+      if (!loan) { await client.query('ROLLBACK'); return { paid: 0, remaining: 0, cleared: true }; }
+      const requested = Math.max(0, Number(amount) || 0);
+      const userRes = await client.query(`SELECT wallet, bank FROM economy_users WHERE userid = $1 FOR UPDATE`);
+      const balance = userRes.rows[0] || { wallet: 0, bank: 0 };
+      const paid = Math.min(Number(loan.remaining), requested, Number(balance.wallet) + Number(balance.bank));
+      const remaining = Number(loan.remaining) - paid;
+      const fromBank = Math.min(Number(balance.bank), paid);
+      const fromWallet = paid - fromBank;
+      await client.query(`UPDATE economy_users SET bank = bank - $1, wallet = wallet - $2 WHERE userid = $3`, [fromBank, fromWallet, userId]);
+      await client.query(`UPDATE economy_loans SET remaining = $1, status = $2, paid_at = CASE WHEN $1 = 0 THEN $3 ELSE paid_at END WHERE id = $4`, [remaining, remaining === 0 ? 'paid' : loan.status, Date.now(), loan.id]);
+      await client.query('COMMIT');
+      return { paid, remaining, cleared: remaining === 0 };
+    } catch (err) { await client.query('ROLLBACK'); throw err; } finally { client.release(); }
+  },
+
+  markOverdueLoans: async () => {
+    const res = await pool.query(`UPDATE economy_loans SET status = 'overdue', overdue_at = COALESCE(overdue_at, $1) WHERE status = 'active' AND due_at <= $1 RETURNING *`, [Date.now()]);
+    return res.rows.map(loan => ({ id: loan.id, userId: loan.userid, username: loan.username, remaining: Number(loan.remaining) }));
+  },
+
+  collectLoanPayment: async (userId, amount) => {
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const loanRes = await client.query(`SELECT * FROM economy_loans WHERE userid = $1 AND status = 'overdue' AND remaining > 0 ORDER BY id DESC LIMIT 1 FOR UPDATE`, [userId]);
+      const loan = loanRes.rows[0];
+      if (!loan) { await client.query('ROLLBACK'); return null; }
+      const paid = Math.min(Number(loan.remaining), Math.max(0, Number(amount) || 0));
+      const remaining = Number(loan.remaining) - paid;
+      await client.query(`UPDATE economy_loans SET remaining = $1, status = $2, paid_at = CASE WHEN $1 = 0 THEN $3 ELSE paid_at END WHERE id = $4`, [remaining, remaining === 0 ? 'paid' : 'overdue', Date.now(), loan.id]);
+      await client.query('COMMIT');
+      return { paid, remaining, cleared: remaining === 0 };
+    } catch (err) { await client.query('ROLLBACK'); throw err; } finally { client.release(); }
   },
 
   // Logging methods

@@ -5,7 +5,8 @@ import 'dotenv/config';
 import {
   Client, GatewayIntentBits, Partials, Events, EmbedBuilder,
   ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder,
-  ButtonBuilder, ButtonStyle, PermissionFlagsBits,
+  ButtonBuilder, ButtonStyle, StringSelectMenuBuilder,
+  PermissionFlagsBits,
 } from 'discord.js';
 import { joinVoiceChannel, VoiceConnectionStatus, entersState } from '@discordjs/voice';
 
@@ -73,7 +74,9 @@ client.once('clientReady', async c => {
   console.log('ℹ️  Discord Developer Portal → Bot → SERVER MEMBERS INTENT + MESSAGE CONTENT INTENT fur!');
   
   setInterval(checkTaxes, 60 * 60 * 1000);
+  setInterval(processOverdueLoans, 60 * 60 * 1000);
   checkTaxes();
+  processOverdueLoans();
 
   deployCommands(token, c.user.id).catch(err => console.error("⚠️ deployCommands error:", err?.message || err));
   
@@ -113,6 +116,26 @@ async function checkTaxes() {
       amount: taxToDeduct
     });
   }
+}
+
+async function processOverdueLoans() {
+  try {
+    const overdue = await db.markOverdueLoans();
+    for (const loan of overdue) {
+      const result = await db.payLoan(loan.userId, loan.remaining);
+      try {
+        const discordUser = await client.users.fetch(loan.userId);
+        const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '🚨 LOAN OVERDUE', result.cleared ? `Deyntaadii **$${loan.remaining.toLocaleString()}** si automatic ah ayaa loo bixiyay.` : `Deyntaada **$${loan.remaining.toLocaleString()}** way dhacday.\\n\\n🏦 Bank → 💵 Cash ayaa laga ururinayaa.\\n💸 Hadda laga bixiyay: **$${result.paid.toLocaleString()}**\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**\\n\\nLacag kasta oo aad hesho waxaa marka hore laga jari doonaa deynta.`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.error);
+        await discordUser.send({ embeds: [embed] });
+      } catch {}
+    }
+  } catch (err) { console.error('⚠️ Loan overdue check error:', err?.message || err); }
+}
+
+function loanCenterEmbed(loan = null) {
+  if (!loan) return econUtils.createEmbed('💳 LOAN CENTER', 'Waxaad amaahan kartaa **$1,000 – $10,000**.\\n⏳ Waqtiga bixinta: **24 Hours**\\n\\n⚠️ Hal loan oo keliya ayaa mar la qaadan karaa.', econUtils.config.colors.economy);
+  const due = Math.max(0, loan.dueAt - Date.now());
+  return econUtils.createEmbed('💳 ACTIVE LOAN', `💰 Loan: **$${loan.principal.toLocaleString()}**\\n💸 Remaining: **$${loan.remaining.toLocaleString()}**\\n⏳ Due in: **${econUtils.formatTime(due)}**\\n📌 Status: **${loan.status}**`, econUtils.config.colors.economy);
 }
 
 const economyCooldowns = new Map();
@@ -165,7 +188,7 @@ async function handleAllMessages(msg) {
   const isAdmin   = ADMIN_IDS.includes(msg.author.id);
 
   // ── Economy Commands ────────────────────────────────────────────────────────
-  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'buydiamond', 'jailbuy', 'dep', 'with', 'give', 'rank', 'xp', 'xprank', 'grant', 'deduct', 'jail', 'jailremoved'];
+  const econCommands = ['cx', 'wallet', 'work', 'daily', 'rob', 'shop', 'buyshield', 'buycash', 'buydiamond', 'jailbuy', 'loan', 'dep', 'with', 'give', 'rank', 'xp', 'xprank', 'grant', 'deduct', 'jail', 'jailremoved'];
   const cmd = content.split(' ')[0].slice(1);
   
   if (econCommands.includes(cmd)) {
@@ -177,6 +200,14 @@ async function handleAllMessages(msg) {
 
     switch (cmd) {
 
+      case 'loan': {
+        const activeLoan = await db.getActiveLoan(msg.author.id);
+        const buttons = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId(`loan_borrow_${msg.author.id}`).setLabel('💰 Deynso Lacagta').setStyle(ButtonStyle.Danger).setDisabled(Boolean(activeLoan)),
+          new ButtonBuilder().setCustomId(`loan_repay_${msg.author.id}`).setLabel('💵 Celi Deynta').setStyle(ButtonStyle.Success).setDisabled(!activeLoan)
+        );
+        return msg.reply({ embeds: [loanCenterEmbed(activeLoan)], components: [buttons] });
+      }
       case 'wallet': {
         const shieldStatus = user.shieldUntil > Date.now() ? '🛡️ **Active**' : '🔓 **Inactive**';
         const walletEmbed = new EmbedBuilder()
@@ -206,10 +237,10 @@ async function handleAllMessages(msg) {
           username: msg.author.username,
           type: 'work',
           description: 'Daily work reward',
-          amount: 200,
+          amount: 500,
           serverId: msg.guild.id
         });
-        return msg.reply('💼 Waxaad shaqeysay maanta, waxaadna heshay **$200 Cash**!');
+        return msg.reply('💼 Waxaad shaqeysay maanta, waxaadna heshay **$500 Cash + 15 XP**!');
       }
       case 'daily': {
         const cooldown = 24 * 60 * 60 * 1000;
@@ -658,6 +689,7 @@ async function handleAllMessages(msg) {
           '`!bank` — `!dep <amount>` ama `!with <amount>`',
           '`!shop` — Shield ama Cash iibso',
           '`!rank` — Top 10 Richest Players',
+          '`!loan` — Deyn $1,000–$10,000; bixinta 24 saac gudahood',
           '`!xprank` — Top 10 XP Players',
         ].join('\n') },
         { name: '📊 Admin/Owner Commands', value: [
@@ -896,6 +928,43 @@ async function handleAllInteractions(interaction) {
   if (interaction.isModalSubmit()) {
     if (interaction.customId === 'setup_embed_modal') { await handleEmbedModal(interaction); return; }
     if (interaction.customId.startsWith('say_modal_')) await handleSayModalSubmit(interaction);
+    return;
+  }
+
+  // ── Loan buttons and menus ────────────────────────────────────────────────
+  if (interaction.isButton() && interaction.customId.startsWith('loan_')) {
+    const [kind, action, ownerId] = interaction.customId.split('_');
+    if (interaction.user.id !== ownerId) { await interaction.reply({ content: '❌ Button-kan adiga kuma khuseeyo.', flags: 64 }); return; }
+    const loan = await db.getActiveLoan(ownerId);
+    if (action === 'borrow') {
+      if (loan) { await interaction.reply({ content: '❌ Waxaad horey u leedahay loan active ah.', flags: 64 }); return; }
+      const options = Array.from({ length: 10 }, (_, i) => { const amount = (i + 1) * 1000; return { label: `$${amount.toLocaleString()}`, value: String(amount), description: `Amaahso $${amount.toLocaleString()}` }; });
+      const menu = new StringSelectMenuBuilder().setCustomId(`loan_amount_${ownerId}`).setPlaceholder('Dooro lacagta aad amaahanayso').addOptions(options);
+      await interaction.reply({ content: '💰 Dooro lacagta loan-ka:', components: [new ActionRowBuilder().addComponents(menu)], flags: 64 });
+      return;
+    }
+    if (action === 'repay') {
+      if (!loan) { await interaction.reply({ content: '❌ Loan active ah ma lihid.', flags: 64 }); return; }
+      const result = await db.payLoan(ownerId, loan.remaining);
+      await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid });
+      const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);
+      await interaction.update({ embeds: [embed], components: [] });
+      try { await interaction.user.send({ embeds: [embed] }); } catch {}
+      return;
+    }
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('loan_amount_')) {
+    const ownerId = interaction.customId.slice('loan_amount_'.length);
+    if (interaction.user.id !== ownerId) { await interaction.reply({ content: '❌ Menu-kan adiga kuma khuseeyo.', flags: 64 }); return; }
+    const amount = Number(interaction.values[0]);
+    const existing = await db.getActiveLoan(ownerId);
+    if (existing) { await interaction.update({ content: '❌ Waxaad horey u leedahay loan active ah.', components: [] }); return; }
+    const loan = await db.createLoan({ userId: ownerId, username: interaction.user.username, amount });
+    await db.addWallet(ownerId, amount);
+    await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_borrow', description: `Loan approved: $${amount}`, amount });
+    const embed = econUtils.createEmbed('💳 LOAN APPROVED', `💰 Loan: **$${amount.toLocaleString()}**\\n⏳ Due: **24 Hours**\\n\\nLacagta waxaa laguugu daray Cash.`, econUtils.config.colors.success);
+    await interaction.update({ content: '', embeds: [embed], components: [] });
+    try { await interaction.user.send({ embeds: [econUtils.createEmbed('💳 New Loan', `Waxaad qaadatay: **$${amount.toLocaleString()}**\\n⏰ Due: **24 Hours**\\n\\nFadlan waqtigeeda ku bixi deyntaada.`, econUtils.config.colors.economy)] }); } catch {}
     return;
   }
 
