@@ -259,12 +259,12 @@ const dbHelper = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const loanRes = await client.query(`SELECT id, principal, remaining, status FROM economy_loans WHERE userid = $1 AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1`, [userId]);
+      const loanRes = await client.query(`SELECT id, principal, remaining, status FROM economy_loans WHERE userid = $1::text AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1`, [String(userId)]);
       const loan = loanRes.rows[0];
       if (!loan) { await client.query('ROLLBACK'); return { paid: 0, remaining: 0, cleared: true }; }
       const requested = Math.max(0, Number(amount) || 0);
-      await client.query(`INSERT INTO economy_users (userid, username) VALUES ($1, $1) ON CONFLICT (userid) DO NOTHING`, [userId]);
-      const userRes = await client.query(`SELECT wallet, bank FROM economy_users WHERE userid = $1`, [userId]);
+      await client.query(`INSERT INTO economy_users (userid, username) VALUES ($1::text, $2::text) ON CONFLICT (userid) DO NOTHING`, [String(userId), String(userId)]);
+      const userRes = await client.query(`SELECT wallet, bank FROM economy_users WHERE userid = $1::text`, [String(userId)]);
       const balance = userRes.rows[0] || { wallet: 0, bank: 0 };
       const currentWallet = Math.max(0, Number(balance.wallet) || 0);
       const currentBank = Math.max(0, Number(balance.bank) || 0);
@@ -273,15 +273,16 @@ const dbHelper = {
       const remaining = currentRemaining - paid;
       const fromBank = Math.min(currentBank, paid);
       const fromWallet = paid - fromBank;
-      await client.query(`UPDATE economy_users SET bank = $1, wallet = $2 WHERE userid = $3`, [currentBank - fromBank, currentWallet - fromWallet, userId]);
-      await client.query(`UPDATE economy_loans SET remaining = $1, status = $2, paid_at = CASE WHEN $1 = 0 THEN $3 ELSE paid_at END WHERE id = $4`, [remaining, remaining === 0 ? 'paid' : loan.status, Date.now(), loan.id]);
+      await client.query(`UPDATE economy_users SET bank = $1::numeric, wallet = $2::numeric WHERE userid = $3::text`, [currentBank - fromBank, currentWallet - fromWallet, String(userId)]);
+      await client.query(`UPDATE economy_loans SET remaining = $1::bigint, status = $2::text, paid_at = CASE WHEN remaining = 0 THEN $3::bigint ELSE paid_at END WHERE id = $4::integer`, [remaining, remaining === 0 ? 'paid' : String(loan.status), Date.now(), loan.id]);
       await client.query('COMMIT');
       return { paid, remaining, cleared: remaining === 0 };
     } catch (err) { await client.query('ROLLBACK'); throw err; } finally { client.release(); }
   },
 
   markOverdueLoans: async () => {
-    const res = await pool.query(`UPDATE economy_loans SET status = 'overdue', overdue_at = COALESCE(overdue_at, $1) WHERE status = 'active' AND due_at <= $1 RETURNING *`, [Date.now()]);
+    const now = Date.now();
+    const res = await pool.query(`UPDATE economy_loans SET status = 'overdue', overdue_at = COALESCE(overdue_at, $1::bigint) WHERE status = 'active' AND due_at <= $2::bigint RETURNING *`, [now, now]);
     return res.rows.map(loan => ({ id: loan.id, userId: loan.userid, username: loan.username, remaining: Number(loan.remaining) }));
   },
 
@@ -289,12 +290,12 @@ const dbHelper = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const loanRes = await client.query(`SELECT * FROM economy_loans WHERE userid = $1 AND status = 'overdue' AND remaining > 0 ORDER BY id DESC LIMIT 1 FOR UPDATE`, [userId]);
+      const loanRes = await client.query(`SELECT * FROM economy_loans WHERE userid = $1::text AND status = 'overdue' AND remaining > 0 ORDER BY id DESC LIMIT 1 FOR UPDATE`, [String(userId)]);
       const loan = loanRes.rows[0];
       if (!loan) { await client.query('ROLLBACK'); return null; }
       const paid = Math.min(Number(loan.remaining), Math.max(0, Number(amount) || 0));
       const remaining = Number(loan.remaining) - paid;
-      await client.query(`UPDATE economy_loans SET remaining = $1, status = $2, paid_at = CASE WHEN $1 = 0 THEN $3 ELSE paid_at END WHERE id = $4`, [remaining, remaining === 0 ? 'paid' : 'overdue', Date.now(), loan.id]);
+      await client.query(`UPDATE economy_loans SET remaining = $1::bigint, status = $2::text, paid_at = CASE WHEN remaining = 0 THEN $3::bigint ELSE paid_at END WHERE id = $4::integer`, [remaining, remaining === 0 ? 'paid' : 'overdue', Date.now(), loan.id]);
       await client.query('COMMIT');
       return { paid, remaining, cleared: remaining === 0 };
     } catch (err) { await client.query('ROLLBACK'); throw err; } finally { client.release(); }
