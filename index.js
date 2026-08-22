@@ -948,8 +948,8 @@ async function handleAllInteractions(interaction) {
     if (action === 'repay') {
       if (!loan) { await interaction.followUp({ content: '❌ Loan active ah ma lihid.', flags: 64 }); return; }
       let result;
-      try { result = await db.payLoan(ownerId, loan.remaining); } catch (err) { console.error('Loan payment error:', err?.message || err); await interaction.followUp({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', flags: 64 }); return; }
-      await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid });
+      try { result = await db.payLoan(ownerId, loan.remaining); } catch (err) { console.error('Loan payment error:', err?.stack || err); await interaction.followUp({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', flags: 64 }); return; }
+      try { await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid, serverId: interaction.guildId }); } catch (err) { console.error('Loan payment log error:', err?.stack || err); }
       const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);
       await interaction.editReply({ embeds: [embed], components: [] });
       try { await interaction.user.send({ embeds: [embed] }); } catch {}
