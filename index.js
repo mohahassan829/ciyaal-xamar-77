@@ -935,20 +935,23 @@ async function handleAllInteractions(interaction) {
   if (interaction.isButton() && interaction.customId.startsWith('loan_')) {
     const [kind, action, ownerId] = interaction.customId.split('_');
     if (interaction.user.id !== ownerId) { await interaction.reply({ content: '❌ Button-kan adiga kuma khuseeyo.', flags: 64 }); return; }
-    const loan = await db.getActiveLoan(ownerId);
+    await interaction.deferUpdate();
+    let loan;
+    try { loan = await db.getActiveLoan(ownerId); } catch (err) { console.error('Loan lookup error:', err?.message || err); await interaction.followUp({ content: '❌ Database-ka loan-ka hadda lama heli karo. Fadlan mar kale isku day.', flags: 64 }); return; }
     if (action === 'borrow') {
-      if (loan) { await interaction.reply({ content: '❌ Waxaad horey u leedahay loan active ah.', flags: 64 }); return; }
+      if (loan) { await interaction.followUp({ content: '❌ Waxaad horey u leedahay loan active ah.', flags: 64 }); return; }
       const options = Array.from({ length: 10 }, (_, i) => { const amount = (i + 1) * 1000; return { label: `$${amount.toLocaleString()}`, value: String(amount), description: `Amaahso $${amount.toLocaleString()}` }; });
       const menu = new StringSelectMenuBuilder().setCustomId(`loan_amount_${ownerId}`).setPlaceholder('Dooro lacagta aad amaahanayso').addOptions(options);
-      await interaction.reply({ content: '💰 Dooro lacagta loan-ka:', components: [new ActionRowBuilder().addComponents(menu)], flags: 64 });
+      await interaction.followUp({ content: '💰 Dooro lacagta loan-ka:', components: [new ActionRowBuilder().addComponents(menu)], flags: 64 });
       return;
     }
     if (action === 'repay') {
-      if (!loan) { await interaction.reply({ content: '❌ Loan active ah ma lihid.', flags: 64 }); return; }
-      const result = await db.payLoan(ownerId, loan.remaining);
+      if (!loan) { await interaction.followUp({ content: '❌ Loan active ah ma lihid.', flags: 64 }); return; }
+      let result;
+      try { result = await db.payLoan(ownerId, loan.remaining); } catch (err) { console.error('Loan payment error:', err?.message || err); await interaction.followUp({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', flags: 64 }); return; }
       await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid });
       const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);
-      await interaction.update({ embeds: [embed], components: [] });
+      await interaction.editReply({ embeds: [embed], components: [] });
       try { await interaction.user.send({ embeds: [embed] }); } catch {}
       return;
     }
@@ -956,14 +959,21 @@ async function handleAllInteractions(interaction) {
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('loan_amount_')) {
     const ownerId = interaction.customId.slice('loan_amount_'.length);
     if (interaction.user.id !== ownerId) { await interaction.reply({ content: '❌ Menu-kan adiga kuma khuseeyo.', flags: 64 }); return; }
+    await interaction.deferUpdate();
     const amount = Number(interaction.values[0]);
-    const existing = await db.getActiveLoan(ownerId);
-    if (existing) { await interaction.update({ content: '❌ Waxaad horey u leedahay loan active ah.', components: [] }); return; }
-    const loan = await db.createLoan({ userId: ownerId, username: interaction.user.username, amount });
-    await db.addWallet(ownerId, amount);
-    await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_borrow', description: `Loan approved: $${amount}`, amount });
+    try {
+      const existing = await db.getActiveLoan(ownerId);
+      if (existing) { await interaction.editReply({ content: '❌ Waxaad horey u leedahay loan active ah.', components: [] }); return; }
+      await db.createLoan({ userId: ownerId, username: interaction.user.username, amount });
+      await db.addWallet(ownerId, amount);
+      await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_borrow', description: `Loan approved: $${amount}`, amount });
+    } catch (err) {
+      console.error('Loan approval error:', err?.message || err);
+      await interaction.editReply({ content: '❌ Loan-ka lama ansixin. Fadlan mar kale isku day.', embeds: [], components: [] });
+      return;
+    }
     const embed = econUtils.createEmbed('💳 LOAN APPROVED', `💰 Loan: **$${amount.toLocaleString()}**\\n⏳ Due: **24 Hours**\\n\\nLacagta waxaa laguugu daray Cash.`, econUtils.config.colors.success);
-    await interaction.update({ content: '', embeds: [embed], components: [] });
+    await interaction.editReply({ content: '', embeds: [embed], components: [] });
     try { await interaction.user.send({ embeds: [econUtils.createEmbed('💳 New Loan', `Waxaad qaadatay: **$${amount.toLocaleString()}**\\n⏰ Due: **24 Hours**\\n\\nFadlan waqtigeeda ku bixi deyntaada.`, econUtils.config.colors.economy)] }); } catch {}
     return;
   }
