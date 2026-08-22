@@ -40,6 +40,20 @@ const dbHelper = {
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS existing_bonus_claimed INTEGER DEFAULT 0`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS wealth_tax_level INTEGER DEFAULT 0`);
       await client.query(`CREATE TABLE IF NOT EXISTS economy_migrations (name TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)`);
+      const balanceResetMigration = await client.query(`SELECT 1 FROM economy_migrations WHERE name = 'economy_2_balance_reset_2026_08'`);
+      if (balanceResetMigration.rowCount === 0) {
+        await client.query('BEGIN');
+        try {
+          await client.query(`UPDATE economy_users SET wallet = 0, bank = CASE WHEN hasplayedcx = 1 THEN 2000 ELSE 1000 END`);
+          await client.query(`INSERT INTO economy_migrations (name, applied_at) VALUES ('economy_2_balance_reset_2026_08', $1)`, [Date.now()]);
+          await client.query(`INSERT INTO economy_migrations (name, applied_at) VALUES ('economy_2_existing_bonus', $1) ON CONFLICT (name) DO NOTHING`, [Date.now()]);
+          await client.query('COMMIT');
+          console.log('✅ Economy balances reset: !cx players=$2,000; others=$1,000.');
+        } catch (resetError) {
+          await client.query('ROLLBACK');
+          throw resetError;
+        }
+      }
       const bonusMigration = await client.query(`SELECT 1 FROM economy_migrations WHERE name = 'economy_2_existing_bonus'`);
       if (bonusMigration.rowCount === 0) {
         await client.query(`UPDATE economy_users SET bank = bank + 2000, existing_bonus_claimed = 1 WHERE hasplayedcx = 1 AND existing_bonus_claimed = 0`);
