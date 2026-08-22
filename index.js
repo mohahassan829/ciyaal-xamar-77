@@ -947,14 +947,33 @@ async function handleAllInteractions(interaction) {
     }
     if (action === 'repay') {
       if (!loan) { await interaction.followUp({ content: '❌ Loan active ah ma lihid.', flags: 64 }); return; }
-      let result;
-      try { result = await db.payLoan(ownerId, loan.remaining); } catch (err) { console.error('Loan payment error:', err?.stack || err); await interaction.followUp({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', flags: 64 }); return; }
-      try { await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid, serverId: interaction.guildId }); } catch (err) { console.error('Loan payment log error:', err?.stack || err); }
-      const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);
-      await interaction.editReply({ embeds: [embed], components: [] });
-      try { await interaction.user.send({ embeds: [embed] }); } catch {}
+      const options = Array.from({ length: 10 }, (_, i) => { const amount = (i + 1) * 1000; return { label: `$${amount.toLocaleString()}`, value: String(amount), description: `Bixi $${amount.toLocaleString()} oo deynta ah` }; });
+      const menu = new StringSelectMenuBuilder().setCustomId(`loan_repay_amount_${ownerId}`).setPlaceholder('Dooro lacagta aad bixinayso').addOptions(options);
+      await interaction.followUp({ content: `💵 Dooro inta aad rabto inaad ka bixiso deyntaada (Remaining: $${Number(loan.remaining).toLocaleString()}):`, components: [new ActionRowBuilder().addComponents(menu)], flags: 64 });
       return;
     }
+  }
+  if (interaction.isStringSelectMenu() && interaction.customId.startsWith('loan_repay_amount_')) {
+    const ownerId = interaction.customId.slice('loan_repay_amount_'.length);
+    if (interaction.user.id !== ownerId) { await interaction.reply({ content: '❌ Menu-kan adiga kuma khuseeyo.', flags: 64 }); return; }
+    await interaction.deferUpdate();
+    const requestedAmount = Number(interaction.values[0]);
+    let loan;
+    let result;
+    try {
+      loan = await db.getActiveLoan(ownerId);
+      if (!loan) { await interaction.editReply({ content: '❌ Loan active ah ma lihid.', embeds: [], components: [] }); return; }
+      result = await db.payLoan(ownerId, requestedAmount);
+      try { await db.logActivity({ userId: ownerId, username: interaction.user.username, type: 'loan_payment', description: `Loan payment: $${result.paid}`, amount: result.paid, serverId: interaction.guildId }); } catch (err) { console.error('Loan payment log error:', err?.stack || err); }
+    } catch (err) {
+      console.error('Loan payment selection error:', err?.stack || err);
+      await interaction.editReply({ content: '❌ Celi Deynta waa fashilantay. Fadlan mar kale isku day.', embeds: [], components: [] });
+      return;
+    }
+    const embed = econUtils.createEmbed(result.cleared ? '✅ LOAN PAID' : '💸 LOAN PAYMENT', result.cleared ? `Deyntaadii **$${loan.principal.toLocaleString()}** waa la bixiyay.\\n🎉 Account-kaagu hadda waa clear.` : `Waxaa laga bixiyay **$${result.paid.toLocaleString()}**.\\n💳 Remaining Loan: **$${result.remaining.toLocaleString()}**`, result.cleared ? econUtils.config.colors.success : econUtils.config.colors.economy);
+    await interaction.editReply({ content: '', embeds: [embed], components: [] });
+    try { await interaction.user.send({ embeds: [embed] }); } catch {}
+    return;
   }
   if (interaction.isStringSelectMenu() && interaction.customId.startsWith('loan_amount_')) {
     const ownerId = interaction.customId.slice('loan_amount_'.length);
