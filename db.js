@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import pg from 'pg';
 const { Pool } = pg;
 
@@ -29,13 +30,15 @@ const dbHelper = {
           hasplayedcx INTEGER DEFAULT 0,
           xp BIGINT DEFAULT 0,
           level INTEGER DEFAULT 1,
-          existing_bonus_claimed INTEGER DEFAULT 0
+          existing_bonus_claimed INTEGER DEFAULT 0,
+          wealth_tax_level INTEGER DEFAULT 0
         )
       `);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS username TEXT`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS xp BIGINT DEFAULT 0`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS level INTEGER DEFAULT 1`);
       await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS existing_bonus_claimed INTEGER DEFAULT 0`);
+      await client.query(`ALTER TABLE economy_users ADD COLUMN IF NOT EXISTS wealth_tax_level INTEGER DEFAULT 0`);
       await client.query(`CREATE TABLE IF NOT EXISTS economy_migrations (name TEXT PRIMARY KEY, applied_at BIGINT NOT NULL)`);
       const bonusMigration = await client.query(`SELECT 1 FROM economy_migrations WHERE name = 'economy_2_existing_bonus'`);
       if (bonusMigration.rowCount === 0) {
@@ -243,6 +246,7 @@ const dbHelper = {
       hasPlayedCX: user.hasplayedcx,
       xp: parseInt(user.xp || 0),
       level: parseInt(user.level || 1),
+      wealthTaxLevel: parseInt(user.wealth_tax_level || 0),
       lastTax: parseInt(user.lasttax || 0)
     }));
   },

@@ -81,32 +81,37 @@ client.once('clientReady', async c => {
 });
 
 async function checkTaxes() {
-  const now = Date.now();
   const users = await db.getAllUsers();
   for (const user of users) {
-    if (now - user.lastTax >= econUtils.config.taxInterval) {
-      let taxToDeduct = econUtils.config.taxAmount;
-      if (user.bank >= taxToDeduct) {
-        await db.updateUser(user.userId, { bank: user.bank - taxToDeduct, lastTax: now });
-      } else {
-        let remaining = taxToDeduct - user.bank;
-        await db.updateUser(user.userId, { bank: 0, wallet: Math.max(0, user.wallet - remaining), lastTax: now });
-      }
-      if (user.hasPlayedCX) {
-        try {
-          const discordUser = await client.users.fetch(user.userId);
-          const taxEmbed = econUtils.createEmbed('💰 Tax System', `Waxaa lagaa jaray **$${econUtils.config.taxAmount}** Tax (3-Day Tax). Mahadsanid isticmaalka Economy-ga.`, econUtils.config.colors.economy);
-          await discordUser.send({ embeds: [taxEmbed] });
-        } catch (err) {}
-      }
-      await db.logActivity({
-        userId: user.userId,
-        username: user.username,
-        type: 'tax',
-        description: '3-Day Tax Deduction',
-        amount: econUtils.config.taxAmount
-      });
+    const totalWealth = user.wallet + user.bank;
+    const taxLevel = await db.getWealthTaxLevel(user.userId);
+    const taxInfo = calculateWealthTax(totalWealth, taxLevel);
+    if (!taxInfo.shouldTax) continue;
+
+    const taxToDeduct = Math.min(taxInfo.taxAmount, totalWealth);
+    const fromBank = Math.min(user.bank, taxToDeduct);
+    const fromWallet = taxToDeduct - fromBank;
+    await db.updateUser(user.userId, {
+      bank: user.bank - fromBank,
+      wallet: Math.max(0, user.wallet - fromWallet),
+      lastTax: Date.now()
+    });
+    await db.updateWealthTaxLevel(user.userId, taxInfo.newTaxLevel);
+    await db.logWealthTax(user.userId, user.username, taxInfo.tier, taxToDeduct);
+    if (user.hasPlayedCX) {
+      try {
+        const discordUser = await client.users.fetch(user.userId);
+        const taxEmbed = econUtils.createEmbed('🧾 GOVERNMENT TAX', `💰 Waxaad gaartay: **$${taxInfo.tier.toLocaleString()}**\n💸 Waxaa lagaa goostay: **$${taxToDeduct.toLocaleString()}**\n🏦 Balance-ka ka dib: **$${(totalWealth - taxToDeduct).toLocaleString()}**\n📅 Threshold: **$${taxInfo.tier.toLocaleString()}**`, econUtils.config.colors.economy);
+        await discordUser.send({ embeds: [taxEmbed] });
+      } catch (err) {}
     }
+    await db.logActivity({
+      userId: user.userId,
+      username: user.username,
+      type: 'tax',
+      description: `Progressive tax at $${taxInfo.tier}`,
+      amount: taxToDeduct
+    });
   }
 }
 
@@ -181,6 +186,7 @@ async function handleAllMessages(msg) {
             { name: '💵 Wallet', value: `\`$${user.wallet.toLocaleString()}\``, inline: true },
             { name: '🏦 Bank', value: `\`$${user.bank.toLocaleString()}\``, inline: true },
             { name: '💎 Diamonds', value: `\`${user.diamonds.toLocaleString()}\``, inline: true },
+            { name: '⭐ XP / Level', value: `\`${user.xp.toLocaleString()} XP · Level ${user.level}\``, inline: true },
             { name: '🛡️ Shield Status', value: shieldStatus, inline: false }
           )
           .setFooter({ text: 'Economy System • Modern & Secure' })
