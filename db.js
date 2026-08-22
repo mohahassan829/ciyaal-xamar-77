@@ -259,17 +259,20 @@ const dbHelper = {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      const loanRes = await client.query(`SELECT * FROM economy_loans WHERE userid = $1 AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1 FOR UPDATE`, [userId]);
+      const loanRes = await client.query(`SELECT id, principal, remaining, status FROM economy_loans WHERE userid = $1 AND status IN ('active', 'overdue') ORDER BY id DESC LIMIT 1`, [userId]);
       const loan = loanRes.rows[0];
       if (!loan) { await client.query('ROLLBACK'); return { paid: 0, remaining: 0, cleared: true }; }
       const requested = Math.max(0, Number(amount) || 0);
-      const userRes = await client.query(`SELECT COALESCE(wallet, 0) AS wallet, COALESCE(bank, 0) AS bank FROM economy_users WHERE userid = $1 FOR UPDATE`, [userId]);
+      const userRes = await client.query(`SELECT wallet, bank FROM economy_users WHERE userid = $1`, [userId]);
       const balance = userRes.rows[0] || { wallet: 0, bank: 0 };
-      const paid = Math.min(Number(loan.remaining), requested, Number(balance.wallet) + Number(balance.bank));
-      const remaining = Number(loan.remaining) - paid;
-      const fromBank = Math.min(Number(balance.bank), paid);
+      const currentWallet = Math.max(0, Number(balance.wallet) || 0);
+      const currentBank = Math.max(0, Number(balance.bank) || 0);
+      const currentRemaining = Math.max(0, Number(loan.remaining) || 0);
+      const paid = Math.min(currentRemaining, requested, currentWallet + currentBank);
+      const remaining = currentRemaining - paid;
+      const fromBank = Math.min(currentBank, paid);
       const fromWallet = paid - fromBank;
-      await client.query(`UPDATE economy_users SET bank = GREATEST(0, COALESCE(bank, 0) - $1), wallet = GREATEST(0, COALESCE(wallet, 0) - $2) WHERE userid = $3`, [fromBank, fromWallet, userId]);
+      await client.query(`UPDATE economy_users SET bank = $1, wallet = $2 WHERE userid = $3`, [currentBank - fromBank, currentWallet - fromWallet, userId]);
       await client.query(`UPDATE economy_loans SET remaining = $1, status = $2, paid_at = CASE WHEN $1 = 0 THEN $3 ELSE paid_at END WHERE id = $4`, [remaining, remaining === 0 ? 'paid' : loan.status, Date.now(), loan.id]);
       await client.query('COMMIT');
       return { paid, remaining, cleared: remaining === 0 };
