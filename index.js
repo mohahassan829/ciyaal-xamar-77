@@ -201,6 +201,9 @@ async function handleAllMessages(msg) {
     switch (cmd) {
 
       case 'loan': {
+        if (Number(user.level || 1) < 3) {
+          return msg.reply({ embeds: [econUtils.createEmbed('🔒 LOAN LOCKED', `Amaahda waxaa heli kara oo keliya players gaaray **Level 3**.\n\n⭐ Level-kaaga hadda: **${Number(user.level || 1)}**\n📈 Sii ciyaar oo XP ururso si aad u gaarto Level 3.`, econUtils.config.colors.error)] });
+        }
         const activeLoan = await db.getActiveLoan(msg.author.id);
         const buttons = new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId(`loan_borrow_${msg.author.id}`).setLabel('💰 Deynso Lacagta').setStyle(ButtonStyle.Danger).setDisabled(Boolean(activeLoan)),
@@ -371,7 +374,7 @@ async function handleAllMessages(msg) {
       case 'buydiamond': {
         const args = msg.content.split(/ +/);
         const amount = parseInt(args[1] || '');
-        const costs = { 1: 30, 5: 60, 10: 100, 25: 200, 50: 300 };
+        const costs = { 1: 30, 5: 60, 10: 100, 25: 500, 50: 300 };
         const cost = costs[amount];
         if (!cost) return msg.reply('❌ Isticmaal: `!buydiamond 1`, `5`, `10`, `25`, ama `50`.');
         if (user.xp < cost) return msg.reply(`❌ XP kugu filan ma haysatid. Waxaad u baahan tahay **${cost} XP**.`);
@@ -689,7 +692,7 @@ async function handleAllMessages(msg) {
           '`!bank` — `!dep <amount>` ama `!with <amount>`',
           '`!shop` — Shield ama Cash iibso',
           '`!rank` — Top 10 Richest Players',
-          '`!loan` — Deyn $1,000–$10,000; bixinta 24 saac gudahood',
+          '`!loan` — Deyn $1,000–$10,000 (Level 3+); bixinta 24 saac gudahood',
           '`!xprank` — Top 10 XP Players',
         ].join('\n') },
         { name: '📊 Admin/Owner Commands', value: [
